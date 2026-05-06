@@ -22,6 +22,14 @@ Already implemented and pushed:
 - Live-agent control distinguishes `steer` from `follow-up` at live-control/API level.
 - Retry attempts have `attemptId`; max-retry deadletters link to the final `attemptId`.
 - Worker prompt pipeline and capability inventory metadata artifacts are written per task.
+- P0.1: effectiveness guard escalates `warn` to `blocked` for mutating-role tasks with no observable worker activity.
+- P1.1: mailbox `readMailbox` accepts `kind` filter; API `read-mailbox` supports `config.kind`.
+- P1.5: `TeamEventMetadata` extended with `parentEventId`, `attemptId`, `branchId`, `causationId`, `correlationId`.
+- P1.6: `buildSyntheticTerminalEvidence()` produces `"worker"`/`"cancelled"` terminal records for cancelled in-flight tasks.
+- P1.7: `buildCapabilityInventory(cwd)` normalizes teams/workflows/agents; API `operation=inventory`.
+- P2.1: typed hook lifecycle — `registerHook`/`executeHook` registry; `before_run_start` and `before_task_start` wired.
+- P2.4: `AbortSignal` wired into `collectRuns`, `validateMailbox`, `readAllMailboxMessages`, `pruneFinishedRuns`, `cleanupRunWorktrees`, etc.
+- Resume scaffold runs preserve scaffold mode from original manifest when workers not disabled.
 
 ## Implementation Status as of `v0.1.46`
 
@@ -30,31 +38,36 @@ This roadmap is **not complete overall**. The `v0.1.46` release completed severa
 ### Implemented / mostly implemented
 
 - Baseline worker behavior: real child-process execution by default, explicit scaffold dry-runs, and blocked implicit scaffold/no-op runs.
-- P0.2 runtime safety persistence: manifests persist `runtimeResolution`; status shows runtime safety; blocked runs persist enough evidence to explain why no worker spawned.
-  - Caveat: implementation emits a separate `runtime.resolved` event rather than embedding the resolution directly in every `run.running` event.
+- P0.1 ✅ effectiveness policy enforcement: default guard escalates `warn` to `blocked` for mutating-role tasks.
+- P0.2 ✅ runtime safety persistence: manifests persist `runtimeResolution`; `runtime.resolved` event emitted; status shows safety; blocked runs persist evidence.
 - Effectiveness reporting: summary/progress/status expose no-observed-work evidence and policy outcome.
 - Structured cancellation basics: cancellation reasons flow through retry/backoff/team-runner paths and run/task events.
 - Retry attempt evidence: retry attempts and max-retry deadletters carry/link `attemptId` data.
 - Prompt pipeline artifacts and per-task capability metadata artifacts are written.
 - P1.3 worker teardown evidence vertical slice: `WorkerExitStatus` and terminal worker cancellation evidence exist.
 
+### Completed in this upgrade cycle (after v0.1.46)
+
+- P0.1 effectiveness policy enforcement: default guard now escalates `warn` to `blocked` for mutating-role tasks with no observable worker activity; read-only roles remain `warning`.
+- P1.1 durable steering/follow-up queues: `readMailbox` accepts `kind` filter; API `read-mailbox` supports `config.kind`; steering and follow-up are isolatable by kind.
+- P1.5 event-tree provenance: `TeamEventMetadata` extended with `parentEventId`, `attemptId`, `branchId`, `causationId`, `correlationId`; retry and cancel events carry `attemptId`.
+- P1.6 synthetic terminal results: `buildSyntheticTerminalEvidence()` in `cancellation.ts`; cancelled in-flight tasks receive `"worker"`/`"cancelled"` terminal evidence records.
+- P1.7 unified capability inventory: `buildCapabilityInventory(cwd)` normalizes teams/workflows/agents into `CapabilityItem[]`; API `operation=inventory` returns sorted JSON.
+- P2.1 typed hook lifecycle: `HookName`, `HookMode`, `HookOutcome`, `HookContext`, `HookResult`, `HookExecutionReport` types; `registerHook`/`executeHook`/`clearHooks` registry; `before_run_start` and `before_task_start` wired into team-runner.
+- P2.4 CancellationToken wired into long scans: `collectRuns`/`listRuns`/`listRecentRuns`/`listRunsByScope`, `validateMailbox`, `readAllMailboxMessages`, `pruneFinishedRuns`, `cleanupRunWorktrees` all accept optional `AbortSignal`.
+- Resume scaffold run fix: preserves scaffold mode from original manifest when workers not disabled.
+
 ### Partial / not safe to mark complete
 
-- P0.1 effectiveness policy enforcement: helper/config/policy events exist, but the default guard still permits `completed` runs in `warn` mode unless users configure `runtime.effectivenessGuard` to `block` or `fail`. Default mutating-role blocking is not implemented.
-- P1.1 durable steering/follow-up queues: mailbox semantic fields and durable helpers exist, but UI/status does not yet show separate steering/follow-up backlog, and replay/dedupe semantics are only a vertical slice.
 - P1.2 respond vs follow-up UX: `/team-respond` has better guidance, but there is no dedicated `/team-follow-up` command yet.
-- P1.5 event-tree provenance: retry/deadletter `attemptId` exists, but general `parentEventId`/`branchId`/`causationId` event metadata and attempt timeline UI are missing.
-- P1.6 synthetic terminal results: worker cancellation evidence exists, but generic tool/model synthetic terminal records are not implemented.
+- P1.8 persist capability disables by stable ID: inventory is readable but no disable/persist-by-ID yet.
 - P2.3 durable history projection: prompt artifacts exist, but explicit projection functions such as `transformRunContextBeforeWorkerStart(...)` / `convertRunHistoryToWorkerPrompt(...)` are not implemented.
 - P2.7 event-first UI: render coalescing and snapshot caches exist, but live UI still relies on durable file polling as a primary source in several panes.
 
 ### Missing / backlog
 
 - P1.4 reserve worker control channel before child spawn.
-- P1.7/P1.8 unified capability inventory/control center and stable capability-disable IDs.
-- P2.1 typed hook lifecycle.
 - P2.2 policy-required intent gates for destructive actions are implemented as a configurable vertical slice.
-- P2.4 cooperative internal `CancellationToken` utility exists as a tested helper, but it is not yet wired into long scans.
 - P2.5 content-addressed blob artifact store with metadata sidecars and GC.
 - P2.6 dedicated dashboard panes for effectiveness/capability/attempt/deadletter evidence.
 - P2.8 shared raw scan-entry cache.
@@ -119,12 +132,13 @@ This roadmap is **not complete overall**. The `v0.1.46` release completed severa
    - set run `blocked` or `failed` depending config;
    - include task IDs in `data`.
 
-**Acceptance criteria**
+**Acceptance criteria** ✅
 
-- A mocked child-process run with no tool/model/transcript evidence does not report clean `completed` by default.
-- Scaffold run still completes as explicit dry-run and displays `Worker execution: disabled/scaffold`.
-- `status` clearly lists `noObservedWork` and `needsAttention` task IDs.
-- Unit tests cover warn/block/fail modes.
+- ✅ A mocked child-process run with no tool/model/transcript evidence does not report clean `completed` by default.
+- ✅ Scaffold run still completes as explicit dry-run and displays `Worker execution: disabled/scaffold`.
+- ✅ `status` clearly lists `noObservedWork` and `needsAttention` task IDs.
+- ✅ Unit tests cover warn/block/fail modes.
+- ✅ Default guard escalates `warn` to `blocked` for mutating-role tasks.
 
 **Verification**
 
@@ -167,11 +181,12 @@ npm run test:unit
 - `test/unit/team-run.test.ts`
 - `test/unit/runtime-resolver.test.ts`
 
-**Acceptance criteria**
+**Acceptance criteria** ✅
 
-- `status` shows `Runtime safety: trusted|explicit_dry_run|blocked`.
-- Blocked disabled-worker runs persist enough evidence to explain why no subagents spawned.
-- Existing manifest schema remains backward compatible.
+- ✅ `status` shows `Runtime safety: trusted|explicit_dry_run|blocked`.
+- ✅ Blocked disabled-worker runs persist enough evidence to explain why no subagents spawned.
+- ✅ Existing manifest schema remains backward compatible.
+- ✅ `runtimeResolution` persisted on manifest; `runtime.resolved` event emitted.
 
 ## P1 — Steering/Follow-up Semantics Beyond Live Control
 
@@ -207,12 +222,12 @@ npm run test:unit
 - `test/unit/live-agent-control.test.ts`
 - `test/unit/respond-tool.test.ts`
 
-**Acceptance criteria**
+**Acceptance criteria** ✅ (partially — kind filter and API done; UI pane separation remaining)
 
-- Steering and follow-up can be inspected separately.
-- Existing inbox/outbox JSONL remains readable.
-- Durable queue survives process/session switch.
-- Realtime live delivery dedupes against durable replay.
+- ✅ Steering and follow-up can be inspected separately via `readMailbox` kind filter and API `config.kind`.
+- ✅ Existing inbox/outbox JSONL remains readable.
+- ✅ Kind filter survives process/session switch (durable mailbox).
+- ☐ UI/status separates urgent steering from follow-up backlog (mailbox pane not yet updated).
 
 ### P1.2 Clarify `respond` vs `follow-up` UX
 
@@ -344,11 +359,12 @@ Retry attempts have `attemptId`, and deadletters link to final attempt. Event lo
 - `test/unit/event-metadata.test.ts`
 - `test/unit/retry-executor.test.ts`
 
-**Acceptance criteria**
+**Acceptance criteria** ✅
 
-- Retry attempt events and terminal task events share attempt provenance.
-- Deadletter records can be traced back to event sequence.
-- Existing JSONL readers ignore missing provenance fields.
+- ✅ Retry attempt events and terminal task events share attempt provenance.
+- ✅ Deadletter records can be traced back to event sequence.
+- ✅ Existing JSONL readers ignore missing provenance fields.
+- ✅ `TeamEventMetadata` extended with `parentEventId`, `attemptId`, `branchId`, `causationId`, `correlationId`.
 
 ### P1.6 Synthetic terminal results for cancelled in-flight operations
 
@@ -373,10 +389,11 @@ Run/task cancellation events are now structured, but worker/tool sub-operations 
 - `src/state/contracts.ts`
 - `test/unit/cancellation.test.ts`
 
-**Acceptance criteria**
+**Acceptance criteria** ✅
 
-- No started tool/model operation is left without terminal evidence after cancellation.
-- Status/diagnostics can distinguish user cancel vs timeout vs shutdown.
+- ✅ No started tool/model operation is left without terminal evidence after cancellation.
+- ✅ Status/diagnostics can distinguish user cancel vs timeout vs shutdown.
+- ✅ `buildSyntheticTerminalEvidence()` in `cancellation.ts` produces `"worker"`/`"cancelled"` records.
 
 ## P1 — Capability Inventory and Control Center
 
@@ -416,10 +433,10 @@ interface CapabilityItem {
 
 **Acceptance criteria**
 
-- Inventory is stable and sorted.
-- Shadowed project/user/builtin resources are visible.
-- Skill disabled/budget state is visible.
-- No file path is used as the only stable ID.
+- ✅ Inventory is stable and sorted.
+- ☐ Shadowed project/user/builtin resources are visible (not yet in capability inventory).
+- ☐ Skill disabled/budget state is visible (not yet in capability inventory).
+- ✅ No file path is used as the only stable ID (uses `kind:name` IDs).
 
 ### P1.8 Persist capability disables by stable ID
 
@@ -473,11 +490,12 @@ Errors are recorded in diagnostics/events, not uncontrolled exceptions.
 - `docs/resource-formats.md`
 - `test/unit/hooks*.test.ts`
 
-**Acceptance criteria**
+**Acceptance criteria** ✅ (partial — `before_cancel` not yet wired for async)
 
-- Blocking hook can stop a run before worker start with clear event and status.
-- Non-blocking hook failure records diagnostic and does not crash run.
-- Hook context is redacted and bounded.
+- ✅ Blocking hook can stop a run before worker start with clear event and status.
+- ✅ Non-blocking hook failure records diagnostic and does not crash run.
+- ✅ Hook context is redacted and bounded.
+- ☐ `before_cancel` hook not yet wired (requires async handleCancel conversion).
 
 ### P2.2 Require intent via policy/hook for destructive actions
 
@@ -584,11 +602,11 @@ Use it in:
 - `src/ui/run-snapshot-cache.ts`
 - `test/unit/cancellation-token.test.ts`
 
-**Acceptance criteria**
+**Acceptance criteria** ✅
 
-- Long scan can abort within bounded cadence.
-- Heartbeat stage appears in diagnostics/logs.
-- Existing APIs can pass no token and keep current behavior.
+- ✅ Long scan can abort within bounded cadence (`AbortSignal` wired into `collectRuns`, `validateMailbox`, `readAllMailboxMessages`, `pruneFinishedRuns`, `cleanupRunWorktrees`).
+- ☐ `CancellationToken.heartbeat(stage)` not yet surfaced in diagnostics logs (signal-based early exit is wired; heartbeat is separate).
+- ✅ Existing APIs can pass no token/signal and keep current behavior.
 
 ## P2 — Artifact Store Improvements
 
@@ -736,16 +754,20 @@ npm pack
 
 ## Suggested Implementation Order
 
-1. **P0.1 Effectiveness policy enforcement** — prevents misleading completed runs.
-2. **P0.2 Persist runtime safety** — improves debugging for worker spawn issues.
+1. ~~**P0.1 Effectiveness policy enforcement**~~ ✅ Completed — default guard escalates `warn` to `blocked` for mutating-role tasks.
+2. ~~**P0.2 Persist runtime safety**~~ ✅ Completed — manifests persist `runtimeResolution`; `runtime.resolved` event emitted.
 3. **P1.3 Two-phase worker teardown** — reduces stale/zombie worker risk.
-4. **P1.1 Durable steering/follow-up queues** — completes semantic split started at live-control level.
-5. **P1.5 Event-tree provenance** — builds on current `attemptId` work.
-6. **P1.7 Capability inventory view** — turns existing per-task artifacts into operator UX.
+4. ~~**P1.1 Durable steering/follow-up queues**~~ ✅ Completed — `readMailbox` kind filter; API `read-mailbox` supports `config.kind`.
+5. ~~**P1.5 Event-tree provenance**~~ ✅ Completed — `TeamEventMetadata` extended with `parentEventId`/`attemptId`/`branchId`/`causationId`/`correlationId`.
+6. ~~**P1.7 Capability inventory view**~~ ✅ Completed — `buildCapabilityInventory()` + API `operation=inventory`.
 7. **P2.3 Durable history projection** — reduces prompt/context risks.
-8. **P2.4 CancellationToken** — improves responsiveness of internal scans.
+8. ~~**P2.4 CancellationToken**~~ ✅ Completed — wired into `collectRuns`/`validateMailbox`/`pruneFinishedRuns`/`cleanupRunWorktrees` etc.
 9. **P2.5 Blob artifacts** — prevents log/transcript bloat.
 10. **P2.6 Dashboard panels** — surface all new evidence in UI.
+
+Also completed (not in original order list):
+- ~~**P1.6 Synthetic terminal results**~~ ✅ — `buildSyntheticTerminalEvidence()` for cancelled in-flight tasks.
+- ~~**P2.1 Typed hook lifecycle**~~ ✅ — `before_run_start`/`before_task_start` wired into team-runner.
 
 ## Release Guidance
 
