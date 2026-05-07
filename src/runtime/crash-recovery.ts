@@ -8,6 +8,7 @@ import { isWorkerHeartbeatStale } from "./worker-heartbeat.ts";
 import type { ManifestCache } from "./manifest-cache.ts";
 import { checkProcessLiveness } from "./process-status.ts";
 import { reconcileStaleRun, type ReconcileResult } from "./stale-reconciler.ts";
+import { executeHook, appendHookEvent } from "../hooks/registry.ts";
 
 export interface RecoveryPlan {
 	runId: string;
@@ -43,6 +44,14 @@ export function detectInterruptedRuns(cwd: string, manifestCache: ManifestCache,
 export async function applyRecoveryPlan(plan: RecoveryPlan, ctx: Pick<ExtensionContext, "cwd">, registry?: MetricRegistry): Promise<void> {
 	const loaded = loadRunManifestById(ctx.cwd, plan.runId);
 	if (!loaded) throw new Error(`Run '${plan.runId}' not found.`);
+
+	const hookReport = await executeHook("run_recovery", { runId: plan.runId, cwd: ctx.cwd });
+	appendHookEvent(loaded.manifest, hookReport);
+	if (hookReport.outcome === "block") {
+		appendEvent(loaded.manifest.eventsPath, { type: "crew.run.recovery_blocked", runId: plan.runId, message: `Recovery blocked by hook: ${hookReport.reason ?? "run_recovery hook blocked the operation."}`, data: { hookOutcome: "block", reason: hookReport.reason } });
+		return;
+	}
+
 	const reset = new Set(plan.resumableTasks);
 	const tasks = loaded.tasks.map((task) => reset.has(task.id) ? { ...task, status: "queued" as const, startedAt: undefined, finishedAt: undefined, error: undefined, heartbeat: undefined } : task);
 	saveRunTasks(loaded.manifest, tasks);
