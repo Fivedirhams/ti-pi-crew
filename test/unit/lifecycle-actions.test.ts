@@ -16,10 +16,10 @@ function createRun(): { cwd: string; runId: string; eventsPath: string } {
 	return { cwd, runId: created.manifest.runId, eventsPath: created.manifest.eventsPath };
 }
 
-test("handleCleanup records audit intent on worktree cleanup events", () => {
+test("handleCleanup records audit intent on worktree cleanup events", async () => {
 	const run = createRun();
 	try {
-		const result = handleCleanup({ action: "cleanup", runId: run.runId, config: { _intent: "clean temporary worktrees before release" } }, { cwd: run.cwd });
+		const result = await handleCleanup({ action: "cleanup", runId: run.runId, config: { _intent: "clean temporary worktrees before release" } }, { cwd: run.cwd });
 		assert.equal(result.isError, false);
 		assert.equal(result.details.intent, "clean temporary worktrees before release");
 		const events = readEvents(run.eventsPath);

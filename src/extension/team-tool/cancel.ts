@@ -6,6 +6,7 @@ import { writeForegroundInterruptRequest } from "../../runtime/foreground-contro
 import { cancellationReasonFromUnknown, buildSyntheticTerminalEvidence, type CancellationReason } from "../../runtime/cancellation.ts";
 import { appendEvent } from "../../state/event-log.ts";
 import { logInternalError } from "../../utils/internal-error.ts";
+import { executeHook, appendHookEvent } from "../../hooks/registry.ts";
 import type { PiTeamsToolResult } from "../tool-result.ts";
 import { result, type TeamContext } from "./context.ts";
 import { enforceDestructiveIntent, intentFromConfig } from "./intent-policy.ts";
@@ -69,12 +70,20 @@ function cancelReasonFromParams(params: TeamToolParamsValue): CancellationReason
 	return { code: reason.code, message: reason.message };
 }
 
-export function handleCancel(params: TeamToolParamsValue, ctx: TeamContext): PiTeamsToolResult {
+export async function handleCancel(params: TeamToolParamsValue, ctx: TeamContext): Promise<PiTeamsToolResult> {
 	const intentError = enforceDestructiveIntent("cancel", params, ctx.config);
 	if (intentError) return intentError;
 	if (!params.runId) return result("Cancel requires runId.", { action: "cancel", status: "error" }, true);
 	const loaded = loadRunManifestById(ctx.cwd, params.runId);
 	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "cancel", status: "error" }, true);
+
+	// Execute before_cancel hook
+	const hookReport = await executeHook("before_cancel", { runId: loaded.manifest.runId, cwd: ctx.cwd });
+	appendHookEvent(loaded.manifest, hookReport);
+	if (hookReport.outcome === "block") {
+		return result(`Cancel blocked by hook: ${hookReport.reason ?? "before_cancel hook blocked the operation."}`, { action: "cancel", status: "error", runId: loaded.manifest.runId }, true);
+	}
+
 	return withRunLockSync(loaded.manifest, () => {
 		if ((loaded.manifest.status === "completed" || loaded.manifest.status === "cancelled") && !params.force) return result(`Run ${loaded.manifest.runId} is already ${loaded.manifest.status}; nothing to cancel. Use force: true to mark it cancelled anyway.`, { action: "cancel", status: "ok", runId: loaded.manifest.runId, artifactsRoot: loaded.manifest.artifactsRoot });
 

@@ -38,11 +38,11 @@ describe("abortOwned", () => {
 		}
 	});
 
-	it("handleCancel records structured cancellation reason", () => {
+	it("handleCancel records structured cancellation reason", async () => {
 		const run = createOwnedRun("session-a");
 		try {
 			saveRunTasks(run.manifest, [{ id: "task-1", runId: run.runId, role: "worker", agent: "worker", title: "task", status: "running", dependsOn: [], cwd: run.cwd }]);
-			const out = handleCancel({ action: "cancel", runId: run.runId, config: { reason: { code: "leader_interrupted", message: "leader stopped run" } } }, { cwd: run.cwd, sessionId: "session-a" });
+			const out = await handleCancel({ action: "cancel", runId: run.runId, config: { reason: { code: "leader_interrupted", message: "leader stopped run" } } }, { cwd: run.cwd, sessionId: "session-a" });
 			assert.equal(out.isError, false);
 			const loaded = loadRunManifestById(run.cwd, run.runId);
 			assert.equal(loaded?.manifest.status, "cancelled");
@@ -59,11 +59,11 @@ describe("abortOwned", () => {
 		}
 	});
 
-	it("handleCancel records audit intent on cancellation events", () => {
+	it("handleCancel records audit intent on cancellation events", async () => {
 		const run = createOwnedRun("session-a");
 		try {
 			saveRunTasks(run.manifest, [{ id: "task-1", runId: run.runId, role: "worker", agent: "worker", title: "task", status: "running", dependsOn: [], cwd: run.cwd }]);
-			const out = handleCancel({ action: "cancel", runId: run.runId, config: { reason: "shutdown", intent: "operator is ending the session for maintenance" } }, { cwd: run.cwd, sessionId: "session-a" });
+			const out = await handleCancel({ action: "cancel", runId: run.runId, config: { reason: "shutdown", intent: "operator is ending the session for maintenance" } }, { cwd: run.cwd, sessionId: "session-a" });
 			assert.equal(out.isError, false);
 			assert.equal(out.details.intent, "operator is ending the session for maintenance");
 			const events = readEvents(run.manifest.eventsPath);
@@ -74,11 +74,11 @@ describe("abortOwned", () => {
 		}
 	});
 
-	it("handleCancel refuses to cancel a foreign owned run", () => {
+	it("handleCancel refuses to cancel a foreign owned run", async () => {
 		const run = createOwnedRun("session-a");
 		try {
 			saveRunTasks(run.manifest, [{ id: "task-1", runId: run.runId, role: "worker", agent: "worker", title: "task", status: "running", dependsOn: [], cwd: run.cwd }]);
-			const out = handleCancel({ action: "cancel", runId: run.runId }, { cwd: run.cwd, sessionId: "session-b" });
+			const out = await handleCancel({ action: "cancel", runId: run.runId }, { cwd: run.cwd, sessionId: "session-b" });
 			assert.equal(out.isError, true);
 			assert.equal(loadRunManifestById(run.cwd, run.runId)?.tasks[0]?.status, "running");
 		} finally {

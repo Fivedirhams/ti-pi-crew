@@ -25,11 +25,11 @@ test("parseConfig accepts policy.requireIntentForDestructiveActions", () => {
 	assert.equal(config.policy?.requireIntentForDestructiveActions, true);
 });
 
-test("cancel is blocked by intent policy before state mutation", () => {
+test("cancel is blocked by intent policy before state mutation", async () => {
 	const run = createRun();
 	try {
 		saveRunTasks(run.manifest, [{ id: "task-1", runId: run.runId, role: "worker", agent: "worker", title: "task", status: "running", dependsOn: [], cwd: run.cwd }]);
-		const out = handleCancel({ action: "cancel", runId: run.runId }, { cwd: run.cwd, sessionId: "session-a", config: parseConfig(policy) });
+		const out = await handleCancel({ action: "cancel", runId: run.runId }, { cwd: run.cwd, sessionId: "session-a", config: parseConfig(policy) });
 		assert.equal(out.isError, true);
 		assert.match(textFromToolResult(out), /requires config\.intent/);
 		assert.equal(loadRunManifestById(run.cwd, run.runId)?.manifest.status, "queued");
@@ -39,11 +39,11 @@ test("cancel is blocked by intent policy before state mutation", () => {
 	}
 });
 
-test("cancel proceeds when required intent is supplied", () => {
+test("cancel proceeds when required intent is supplied", async () => {
 	const run = createRun();
 	try {
 		saveRunTasks(run.manifest, [{ id: "task-1", runId: run.runId, role: "worker", agent: "worker", title: "task", status: "running", dependsOn: [], cwd: run.cwd }]);
-		const out = handleCancel({ action: "cancel", runId: run.runId, config: { intent: "stop runaway background worker" } }, { cwd: run.cwd, sessionId: "session-a", config: parseConfig(policy) });
+		const out = await handleCancel({ action: "cancel", runId: run.runId, config: { intent: "stop runaway background worker" } }, { cwd: run.cwd, sessionId: "session-a", config: parseConfig(policy) });
 		assert.equal(out.isError, false);
 		assert.equal(out.details.intent, "stop runaway background worker");
 		assert.equal(loadRunManifestById(run.cwd, run.runId)?.manifest.status, "cancelled");
@@ -52,12 +52,12 @@ test("cancel proceeds when required intent is supplied", () => {
 	}
 });
 
-test("cleanup requires intent only when force is set", () => {
+test("cleanup requires intent only when force is set", async () => {
 	const run = createRun();
 	try {
-		const normal = handleCleanup({ action: "cleanup", runId: run.runId }, { cwd: run.cwd, config: parseConfig(policy) });
+		const normal = await handleCleanup({ action: "cleanup", runId: run.runId }, { cwd: run.cwd, config: parseConfig(policy) });
 		assert.equal(normal.isError, false);
-		const forced = handleCleanup({ action: "cleanup", runId: run.runId, force: true }, { cwd: run.cwd, config: parseConfig(policy) });
+		const forced = await handleCleanup({ action: "cleanup", runId: run.runId, force: true }, { cwd: run.cwd, config: parseConfig(policy) });
 		assert.equal(forced.isError, true);
 		assert.match(textFromToolResult(forced), /requires config\.intent/);
 	} finally {
