@@ -9,6 +9,7 @@ import type { MailboxMessageStatus } from "../state/mailbox.ts";
 import { loadRunManifestById, loadRunManifestByIdAsync } from "../state/state-store.ts";
 import type { TeamRunManifest, TeamTaskState } from "../state/types.ts";
 import type { RunSnapshotCache as RunSnapshotCacheBase, RunUiGroupJoin, RunUiMailbox, RunUiProgress, RunUiSnapshot, RunUiUsage } from "./snapshot-types.ts";
+import { runEventBus } from "./run-event-bus.ts";
 
 export interface RunSnapshotCache extends RunSnapshotCacheBase {
 	preloadStale(runId: string): Promise<RunUiSnapshot | undefined>;
@@ -688,6 +689,12 @@ export function createRunSnapshotCache(cwd: string, options: RunSnapshotCacheOpt
 		}
 	}
 
+	const unsubscribe = runEventBus.onAny((event) => {
+		if (entries.has(event.runId)) {
+			entries.delete(event.runId);
+		}
+	});
+
 	return {
 		get(runId: string): RunUiSnapshot | undefined {
 			const entry = entries.get(runId);
@@ -719,6 +726,7 @@ export function createRunSnapshotCache(cwd: string, options: RunSnapshotCacheOpt
 			return new Map([...entries.entries()].map(([key, entry]) => [key, entry.snapshot]));
 		},
 		dispose(): void {
+			unsubscribe();
 			entries.clear();
 		},
 	};

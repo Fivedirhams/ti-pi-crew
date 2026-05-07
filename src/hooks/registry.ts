@@ -1,6 +1,7 @@
 import type { HookDefinition, HookName, HookContext, HookResult, HookExecutionReport } from "./types.ts";
 import { appendEvent } from "../state/event-log.ts";
 import type { TeamRunManifest } from "../state/types.ts";
+import { runEventBus } from "../ui/run-event-bus.ts";
 
 const registry = new Map<HookName, HookDefinition[]>();
 
@@ -50,4 +51,5 @@ export function appendHookEvent(manifest: TeamRunManifest, report: HookExecution
 		message: `Hook ${report.hookName} completed with outcome=${report.outcome}${report.reason ? `: ${report.reason}` : ""}`,
 		data: { hookName: report.hookName, outcome: report.outcome, durationMs: report.durationMs, reason: report.reason },
 	});
+	runEventBus.emit({ type: "effectiveness_changed", runId: manifest.runId, data: { hookName: report.hookName, outcome: report.outcome } });
 }
