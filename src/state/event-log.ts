@@ -5,6 +5,7 @@ import { DEFAULT_EVENT_LOG } from "../config/defaults.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
 import { emitFromTeamEvent } from "../ui/run-event-bus.ts";
 import { logInternalError } from "../utils/internal-error.ts";
+import { readJsonlSince, type IncrementalReadState } from "../utils/incremental-reader.ts";
 import { redactSecrets } from "../utils/redaction.ts";
 
 export type TeamEventProvenance = "live_worker" | "test" | "healthcheck" | "replay" | "api" | "background" | "team_runner";
@@ -172,13 +173,40 @@ export function readEvents(eventsPath: string): TeamEvent[] {
 export interface EventCursorOptions {
 	sinceSeq?: number;
 	limit?: number;
+	fromByteOffset?: number;
+}
+
+export interface EventCursorResult {
+	events: TeamEvent[];
+	nextSeq: number;
+	total: number;
+	nextByteOffset?: number;
 }
 
 function positiveInteger(value: number | undefined): number | undefined {
 	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-export function readEventsCursor(eventsPath: string, options: EventCursorOptions = {}): { events: TeamEvent[]; nextSeq: number; total: number } {
+export function readEventsCursor(eventsPath: string, options: EventCursorOptions = {}): EventCursorResult {
+	// Incremental byte-offset path: read only new bytes since last known offset
+	if (options.fromByteOffset !== undefined) {
+		const byteOffset = positiveInteger(options.fromByteOffset) ?? 0;
+		const initialState: IncrementalReadState = { byteOffset, lineCount: 0 };
+		const { items, state: newState, eof } = readJsonlSince<TeamEvent>(eventsPath, initialState);
+		const sinceSeq = positiveInteger(options.sinceSeq) ?? 0;
+		const filtered = items.filter((event) => (event.metadata?.seq ?? 0) > sinceSeq);
+		const limit = positiveInteger(options.limit);
+		const events = limit !== undefined ? filtered.slice(0, limit) : filtered;
+		const returnedMaxSeq = events.reduce((max, event) => Math.max(max, event.metadata?.seq ?? 0), sinceSeq);
+		return {
+			events,
+			nextSeq: returnedMaxSeq,
+			total: filtered.length,
+			nextByteOffset: newState.byteOffset,
+		};
+	}
+
+	// Original behavior: read entire file
 	const sinceSeq = positiveInteger(options.sinceSeq) ?? 0;
 	const limit = positiveInteger(options.limit);
 	const all = readEvents(eventsPath);

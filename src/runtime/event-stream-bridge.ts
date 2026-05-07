@@ -1,4 +1,5 @@
 import { runEventBus } from "../ui/run-event-bus.ts";
+import { subprocessToolRegistry, type SubprocessToolEvent } from "./subprocess-tool-registry.ts";
 
 export interface StreamBridgeEvent {
 	runId: string;
@@ -9,6 +10,7 @@ export interface StreamBridgeEvent {
 	intent?: string;
 	tokens?: number;
 	timestamp: number;
+	extractedToolData?: Record<string, unknown>;
 }
 
 const activeBridges = new Map<string, (event: StreamBridgeEvent) => void>();
@@ -65,6 +67,23 @@ export function bridgeEventFromJsonEvent(runId: string, taskId: string, event: u
 		const input = typeof u.input === "number" ? u.input : 0;
 		const output = typeof u.output === "number" ? u.output : 0;
 		if (input || output) result.tokens = input + output;
+	}
+
+	// Attach extracted tool data via subprocess tool registry
+	if (result.toolName && subprocessToolRegistry.hasHandler(result.toolName)) {
+		const handler = subprocessToolRegistry.getHandler(result.toolName);
+		if (handler?.extractData) {
+			const extracted = handler.extractData({
+				toolName: result.toolName,
+				toolCallId: (record.toolCallId as string) ?? "",
+				args: record.args as Record<string, unknown> | undefined,
+				result: record.result as SubprocessToolEvent["result"],
+				isError: record.isError as boolean | undefined,
+			});
+			if (extracted !== undefined) {
+				result.extractedToolData = { [result.toolName]: extracted };
+			}
+		}
 	}
 
 	return result;

@@ -230,6 +230,7 @@ export interface TeamTaskState {
 	role: string;
 	agent: string;
 	title: string;
+	displayName?: string;
 	status: TeamTaskStatus;
 	dependsOn: string[];
 	cwd: string;
