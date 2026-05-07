@@ -9,7 +9,7 @@ import { notifyActiveRuns } from "./session-summary.ts";
 import { LiveRunSidebar } from "../ui/live-run-sidebar.ts";
 import { registerPiCrewRpc, type PiCrewRpcHandle } from "./cross-extension-rpc.ts";
 import { stopCrewWidget, updateCrewWidget, type CrewWidgetState } from "../ui/crew-widget.ts";
-import { clearPiCrewPowerbar, registerPiCrewPowerbarSegments, updatePiCrewPowerbar } from "../ui/powerbar-publisher.ts";
+import { clearPiCrewPowerbar, disposePowerbarCoalescer, registerPiCrewPowerbarSegments, requestPowerbarUpdate, updatePiCrewPowerbar } from "../ui/powerbar-publisher.ts";
 import { loadRunManifestById, updateRunStatus } from "../state/state-store.ts";
 import type { TeamRunManifest } from "../state/types.ts";
 import { terminateActiveChildPiProcesses } from "../subagents/spawn.ts";
@@ -113,7 +113,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 			if (currentCtx) {
 				const uiConfig = loadConfig(currentCtx.cwd).config.ui;
 				updateCrewWidget(currentCtx, widgetState, uiConfig, getManifestCache(currentCtx.cwd), getRunSnapshotCache(currentCtx.cwd));
-				updatePiCrewPowerbar(pi.events, currentCtx.cwd, uiConfig, getManifestCache(currentCtx.cwd), getRunSnapshotCache(currentCtx.cwd), currentCtx, widgetState.notificationCount ?? 0);
+				requestPowerbarUpdate(pi.events, currentCtx.cwd, uiConfig, getManifestCache(currentCtx.cwd), getRunSnapshotCache(currentCtx.cwd), currentCtx, widgetState.notificationCount ?? 0);
 			}
 		});
 	};
@@ -335,7 +335,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 					if (ownerCurrent && currentCtx) {
 						const config = loadConfig(currentCtx.cwd).config.ui;
 						updateCrewWidget(currentCtx, widgetState, config, getManifestCache(currentCtx.cwd), getRunSnapshotCache(currentCtx.cwd));
-						updatePiCrewPowerbar(pi.events, currentCtx.cwd, config, getManifestCache(currentCtx.cwd), getRunSnapshotCache(currentCtx.cwd), currentCtx, widgetState.notificationCount ?? 0);
+						requestPowerbarUpdate(pi.events, currentCtx.cwd, config, getManifestCache(currentCtx.cwd), getRunSnapshotCache(currentCtx.cwd), currentCtx, widgetState.notificationCount ?? 0);
 					}
 				});
 		});
@@ -353,6 +353,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 		stopAsyncRunNotifier(notifierState);
 		stopCrewWidget(currentCtx, widgetState, currentCtx ? loadConfig(currentCtx.cwd).config.ui : undefined);
 		clearPiCrewPowerbar(pi.events, currentCtx);
+		disposePowerbarCoalescer();
 		heartbeatWatcher?.dispose();
 		metricSink?.dispose();
 		eventMetricSub?.dispose();
@@ -475,7 +476,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 			} else {
 				updateCrewWidget(currentCtx, widgetState, config, activeCache, snapshotCache, manifests);
 			}
-			updatePiCrewPowerbar(pi.events, currentCtx.cwd, config, activeCache, snapshotCache, currentCtx, widgetState.notificationCount ?? 0, manifests);
+			requestPowerbarUpdate(pi.events, currentCtx.cwd, config, activeCache, snapshotCache, currentCtx, widgetState.notificationCount ?? 0, manifests);
 			// Health notifications: only warn about genuinely running runs
 			const now = Date.now();
 			for (const run of manifests) {

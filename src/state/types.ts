@@ -39,6 +39,17 @@ export interface VerificationEvidence {
 	notes?: string;
 }
 
+export interface TaskOutputSchema {
+	/** Output format expected from the worker */
+	format: "json" | "markdown" | "text";
+	/** JTD or JSON Schema for validating JSON output (only when format="json") */
+	schema?: Record<string, unknown>;
+	/** Human-readable description of expected output */
+	description?: string;
+	/** Example of valid output (for prompt guidance) */
+	example?: string;
+}
+
 export interface TaskPacket {
 	objective: string;
 	scope: TaskScope;
@@ -53,6 +64,7 @@ export interface TaskPacket {
 	constraints: string[];
 	expectedArtifacts: string[];
 	verification: VerificationContract;
+	outputSchema?: TaskOutputSchema;
 }
 
 export type PolicyDecisionAction = "retry" | "reassign" | "escalate" | "block" | "notify" | "cleanup" | "closeout" | "fail";

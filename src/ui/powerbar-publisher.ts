@@ -10,6 +10,7 @@ import { logInternalError } from "../utils/internal-error.ts";
 import type { ManifestCache } from "../runtime/manifest-cache.ts";
 import type { RunSnapshotCache, RunUiSnapshot } from "./snapshot-types.ts";
 import { notificationBadge } from "./crew-widget.ts";
+import { RenderCoalescer } from "./render-coalescer.ts";
 
 type EventBus = { emit?: (event: string, data: unknown) => void; listenerCount?: (event: string) => number } | undefined;
 type StatusContext = { hasUI?: boolean; ui?: { setStatus?: (key: string, text: string | undefined) => void } } | undefined;
@@ -120,6 +121,52 @@ export function updatePiCrewPowerbar(events: EventBus, cwd: string, config?: Cre
 		barSegments: 8,
 	});
 	if (useStatusFallback) setStatusFallback(ctx, `${activeText}${activeSuffix ? ` · ${activeSuffix}` : ""} · ${progressSuffix}`);
+}
+
+// --- Coalesced powerbar update ---
+
+interface PowerbarUpdateArgs {
+	events: EventBus;
+	cwd: string;
+	config?: CrewUiConfig;
+	manifestCache?: ManifestCache;
+	snapshotCache?: RunSnapshotCache;
+	ctx?: StatusContext;
+	notificationCount: number;
+	preloadedManifests?: TeamRunManifest[];
+}
+
+let latestArgs: PowerbarUpdateArgs | null = null;
+
+const powerbarCoalescer = new RenderCoalescer(() => {
+	if (!latestArgs) return;
+	const a = latestArgs;
+	latestArgs = null;
+	updatePiCrewPowerbar(a.events, a.cwd, a.config, a.manifestCache, a.snapshotCache, a.ctx, a.notificationCount, a.preloadedManifests);
+}, 200);
+
+/**
+ * Request a coalesced powerbar update. Multiple rapid calls are batched into a single
+ * render pass within 200ms, preventing UI flicker from event bursts.
+ */
+export function requestPowerbarUpdate(
+	events: EventBus,
+	cwd: string,
+	config?: CrewUiConfig,
+	manifestCache?: ManifestCache,
+	snapshotCache?: RunSnapshotCache,
+	ctx?: StatusContext,
+	notificationCount = 0,
+	preloadedManifests?: TeamRunManifest[],
+): void {
+	if (config?.powerbar === false) return;
+	latestArgs = { events, cwd, config, manifestCache, snapshotCache, ctx, notificationCount, preloadedManifests };
+	powerbarCoalescer.request();
+}
+
+/** Dispose the powerbar coalescer. Call during extension cleanup. */
+export function disposePowerbarCoalescer(): void {
+	powerbarCoalescer.dispose();
 }
 
 export function clearPiCrewPowerbar(events: EventBus, ctx?: StatusContext): void {

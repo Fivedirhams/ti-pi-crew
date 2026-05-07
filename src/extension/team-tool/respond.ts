@@ -2,7 +2,7 @@ import type { TeamToolParamsValue } from "../../schema/team-tool-schema.ts";
 import { withRunLockSync } from "../../state/locks.ts";
 import { loadRunManifestById, saveRunTasks, updateRunStatus } from "../../state/state-store.ts";
 import { appendEvent } from "../../state/event-log.ts";
-import { appendMailboxMessage } from "../../state/mailbox.ts";
+import { appendMailboxMessage, updateMailboxMessageReply } from "../../state/mailbox.ts";
 import { saveCrewAgents, recordFromTask } from "../../runtime/crew-agent-records.ts";
 import { logInternalError } from "../../utils/internal-error.ts";
 import type { PiTeamsToolResult } from "../tool-result.ts";
@@ -60,8 +60,16 @@ export function handleRespond(params: TeamToolParamsValue, ctx: TeamContext): Pi
 				priority: "normal",
 				deliveryMode: "next_turn",
 				data: { action: "respond", kind: "response" },
+				replyTo: params.replyTo,
+				replyFrom: params.replyFrom,
+				replyDeadline: params.replyDeadline,
 			});
 			mailboxIds.push(mailbox.id);
+		}
+
+		// If this respond includes a replyTo, update the original message with reply metadata.
+		if (params.replyTo) {
+			updateMailboxMessageReply(fresh.manifest, params.replyTo, message || "(resume)");
 		}
 
 		// Re-queue waiting tasks so durable scheduler/resume can pick them up again.

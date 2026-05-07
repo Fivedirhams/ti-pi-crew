@@ -1,5 +1,5 @@
 import type { AgentConfig } from "../../agents/agent-config.ts";
-import type { TeamRunManifest, TeamTaskState } from "../../state/types.ts";
+import type { TeamRunManifest, TeamTaskState, TaskOutputSchema } from "../../state/types.ts";
 import type { WorkflowStep } from "../../workflows/workflow-config.ts";
 import { buildMemoryBlock } from "../agent-memory.ts";
 import { permissionForRole } from "../role-permission.ts";
@@ -49,6 +49,27 @@ export function coordinationBridgeInstructions(task: TeamTaskState): string {
 
 function inputDependencyContext(task: TeamTaskState): string {
 	return (task as TeamTaskState & { dependencyContextText?: string }).dependencyContextText ?? "";
+}
+
+export function renderOutputSchemaBlock(outputSchema: TaskOutputSchema): string {
+	const lines: string[] = ["## Expected Output Format"];
+	lines.push(`Your final output must be ${outputSchema.format}.`);
+	if (outputSchema.description) {
+		lines.push(outputSchema.description);
+	}
+	if (outputSchema.format === "json" && outputSchema.schema) {
+		lines.push("The output must match this schema:");
+		lines.push("```json");
+		lines.push(JSON.stringify(outputSchema.schema, null, 2));
+		lines.push("```");
+	}
+	if (outputSchema.example) {
+		lines.push("Example output:");
+		lines.push("```");
+		lines.push(outputSchema.example);
+		lines.push("```");
+	}
+	return lines.join("\n");
 }
 
 export interface RenderedTaskPrompt {
@@ -108,6 +129,7 @@ export async function renderTaskPrompt(manifest: TeamRunManifest, step: Workflow
 		"",
 		(inputDependencyContext(task) || ""),
 		memoryBlock,
+		task.taskPacket?.outputSchema ? renderOutputSchemaBlock(task.taskPacket.outputSchema) : "",
 		"Task:",
 		step.task.replaceAll("{goal}", manifest.goal),
 	].join("\n");

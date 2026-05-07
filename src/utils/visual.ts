@@ -3,12 +3,43 @@ export const ANSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const WIDTH_CACHE_LIMIT = 256;
 const widthCache = new Map<string, number>();
 
+/** Code-point ranges that render as width 2 in most terminals (CJK + emoji). */
+const WIDE_RANGES: Array<[number, number]> = [
+	// CJK Unified Ideographs
+	[0x4E00, 0x9FFF],
+	// CJK Extension A
+	[0x3400, 0x4DBF],
+	// CJK Compatibility Ideographs
+	[0xF900, 0xFAFF],
+	// Hangul Syllables
+	[0xAC00, 0xD7AF],
+	// CJK Symbols and Punctuation, Hiragana, Katakana
+	[0x3000, 0x33FF],
+	// Fullwidth forms
+	[0xFF01, 0xFF60],
+	// Emoji blocks
+	[0x2600, 0x27BF],  // Miscellaneous Symbols + Dingbats (includes ✅)
+	[0x1F300, 0x1F9FF], // Misc Symbols, Emoticons, Transport, Map, Supplement
+	[0x1FA00, 0x1FAFF], // Symbols Extended-A
+	[0x1F000, 0x1F02F], // Mahjong, Dominos
+	[0x2702, 0x27B0],   // Dingbats
+	[0xFE00, 0xFE0F],   // Variation Selectors (emoji presentation)
+	[0x200D, 0x200D],   // Zero Width Joiner (creates compound emoji)
+];
+
+function isWideCodePoint(code: number): boolean {
+	for (const [lo, hi] of WIDE_RANGES) {
+		if (code >= lo && code <= hi) return true;
+	}
+	return false;
+}
+
 export function visibleWidth(value: string): number {
 	// Skip caching for very long strings to avoid memory pressure.
 	if (value.length > 4096) {
 		let length = 0;
 		for (const char of value.replace(ANSI_PATTERN, "")) {
-			if (char !== "\n") length += 1;
+			if (char !== "\n") length += isWideCodePoint(char.codePointAt(0) ?? 0) ? 2 : 1;
 		}
 		return length;
 	}
@@ -16,7 +47,7 @@ export function visibleWidth(value: string): number {
 	if (cached !== undefined) return cached;
 	let length = 0;
 	for (const char of value.replace(ANSI_PATTERN, "")) {
-		if (char !== "\n") length += 1;
+		if (char !== "\n") length += isWideCodePoint(char.codePointAt(0) ?? 0) ? 2 : 1;
 	}
 	if (widthCache.size >= WIDTH_CACHE_LIMIT) {
 		const firstKey = widthCache.keys().next().value;

@@ -25,6 +25,16 @@ export interface MailboxMessage {
 	taskId?: string;
 	acknowledgedAt?: string;
 	data?: Record<string, unknown>;
+	/** ID of the original message this is a reply to. */
+	replyTo?: string;
+	/** Task ID sending the reply. */
+	replyFrom?: string;
+	/** Ms epoch deadline for a reply. */
+	replyDeadline?: number;
+	/** ISO timestamp when a reply was received for this message. */
+	repliedAt?: string;
+	/** Content of the reply received for this message. */
+	replyContent?: string;
 }
 
 export interface MailboxDeliveryState {
@@ -155,7 +165,7 @@ function parseMailboxMessage(raw: unknown, expectedDirection: MailboxDirection):
 	if (obj.direction !== expectedDirection) return undefined;
 	const data = obj.data && typeof obj.data === "object" && !Array.isArray(obj.data) ? obj.data as Record<string, unknown> : undefined;
 	const dataKind = data?.kind;
-	return { id: obj.id, runId: obj.runId, direction: obj.direction, from: obj.from, to: obj.to, body: obj.body, createdAt: obj.createdAt, status: obj.status, kind: isKind(obj.kind) ? obj.kind : isKind(dataKind) ? dataKind : undefined, priority: isPriority(obj.priority) ? obj.priority : undefined, deliveryMode: isDeliveryMode(obj.deliveryMode) ? obj.deliveryMode : undefined, taskId: typeof obj.taskId === "string" ? obj.taskId : undefined, acknowledgedAt: typeof obj.acknowledgedAt === "string" ? obj.acknowledgedAt : undefined, data };
+	return { id: obj.id, runId: obj.runId, direction: obj.direction, from: obj.from, to: obj.to, body: obj.body, createdAt: obj.createdAt, status: obj.status, kind: isKind(obj.kind) ? obj.kind : isKind(dataKind) ? dataKind : undefined, priority: isPriority(obj.priority) ? obj.priority : undefined, deliveryMode: isDeliveryMode(obj.deliveryMode) ? obj.deliveryMode : undefined, taskId: typeof obj.taskId === "string" ? obj.taskId : undefined, acknowledgedAt: typeof obj.acknowledgedAt === "string" ? obj.acknowledgedAt : undefined, data, replyTo: typeof obj.replyTo === "string" ? obj.replyTo : undefined, replyFrom: typeof obj.replyFrom === "string" ? obj.replyFrom : undefined, replyDeadline: typeof obj.replyDeadline === "number" ? obj.replyDeadline : undefined, repliedAt: typeof obj.repliedAt === "string" ? obj.repliedAt : undefined, replyContent: typeof obj.replyContent === "string" ? obj.replyContent : undefined };
 }
 
 function readMailboxFile(filePath: string, direction: MailboxDirection): MailboxMessage[] {
@@ -243,6 +253,11 @@ export function appendMailboxMessage(manifest: TeamRunManifest, message: Omit<Ma
 		deliveryMode: message.deliveryMode,
 		taskId: message.taskId,
 		data: message.data,
+		replyTo: message.replyTo,
+		replyFrom: message.replyFrom,
+		replyDeadline: message.replyDeadline,
+		repliedAt: message.repliedAt,
+		replyContent: message.replyContent,
 	};
 	fs.appendFileSync(mailboxFile(manifest, complete.direction, complete.taskId), `${JSON.stringify(redactSecrets(complete))}\n`, "utf-8");
 	const delivery = readDeliveryState(manifest);
@@ -280,6 +295,58 @@ export function acknowledgeMailboxMessage(manifest: TeamRunManifest, messageId: 
 	delivery.updatedAt = new Date().toISOString();
 	writeDeliveryState(manifest, delivery);
 	return delivery;
+}
+
+/**
+ * Update an original mailbox message with reply metadata.
+ * Rewrites the mailbox file line containing the original message
+ * to include `repliedAt` and `replyContent`.
+ */
+export function updateMailboxMessageReply(manifest: TeamRunManifest, originalMessageId: string, replyContent: string): void {
+	const directions: MailboxDirection[] = ["inbox", "outbox"];
+
+	// Collect all mailbox file paths (global + task-specific)
+	const filesToSearch: Array<{ filePath: string; direction: MailboxDirection }> = [];
+	for (const direction of directions) {
+		filesToSearch.push({ filePath: mailboxFile(manifest, direction), direction });
+	}
+	const tasksDir = safeMailboxTasksRoot(manifest);
+	if (fs.existsSync(tasksDir)) {
+		for (const entry of fs.readdirSync(tasksDir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			for (const direction of directions) {
+				filesToSearch.push({ filePath: mailboxFile(manifest, direction, entry.name), direction });
+			}
+		}
+	}
+
+	for (const { filePath, direction } of filesToSearch) {
+		if (!fs.existsSync(filePath)) continue;
+		const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/).filter(Boolean);
+		let found = false;
+		const updatedLines: string[] = [];
+		for (const line of lines) {
+			try {
+				const parsed = JSON.parse(line) as unknown;
+				const msg = parseMailboxMessage(parsed, direction);
+				if (msg && msg.id === originalMessageId) {
+					msg.repliedAt = new Date().toISOString();
+					msg.replyContent = replyContent;
+					updatedLines.push(JSON.stringify(redactSecrets(msg)));
+					found = true;
+				} else {
+					updatedLines.push(line);
+				}
+			} catch {
+				updatedLines.push(line);
+			}
+		}
+		if (found) {
+			fs.writeFileSync(filePath, `${updatedLines.join("\n")}\n`, "utf-8");
+			return;
+		}
+	}
+	// Not finding the original is non-fatal; the reply is still delivered.
 }
 
 export function replayPendingMailboxMessages(manifest: TeamRunManifest): MailboxReplayResult {

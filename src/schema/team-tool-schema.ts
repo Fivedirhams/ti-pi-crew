@@ -85,6 +85,9 @@ export const TeamToolParams = Type.Object({
 	force: Type.Optional(Type.Boolean({ description: "Override reference checks for destructive management actions." })),
 	keep: Type.Optional(Type.Integer({ minimum: 0, description: "Number of finished runs to keep for prune." })),
 	updateReferences: Type.Optional(Type.Boolean({ description: "When renaming agents or workflows, update team references in the same project/user scope." })),
+	replyTo: Type.Optional(Type.String({ description: "ID of the original mailbox message this is a reply to." })),
+	replyFrom: Type.Optional(Type.String({ description: "Task ID sending the reply." })),
+	replyDeadline: Type.Optional(Type.Integer({ description: "Ms epoch deadline for a reply." })),
 });
 
 export interface TeamToolParamsValue {
@@ -112,4 +115,10 @@ export interface TeamToolParamsValue {
 	force?: boolean;
 	keep?: number;
 	updateReferences?: boolean;
+	/** ID of the original mailbox message this is a reply to. */
+	replyTo?: string;
+	/** Task ID sending the reply. */
+	replyFrom?: string;
+	/** Ms epoch deadline for a reply. */
+	replyDeadline?: number;
 }

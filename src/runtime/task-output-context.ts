@@ -5,8 +5,19 @@ import { writeArtifact } from "../state/artifact-store.ts";
 import { resolveRealContainedPath } from "../utils/safe-paths.ts";
 import type { WorkflowStep } from "../workflows/workflow-config.ts";
 
+export interface DependencyContextEntry {
+	taskId: string;
+	role: string;
+	status: string;
+	resultSummary: string;
+	resultPath?: string;
+	structuredResults?: Record<string, unknown>;
+	artifactsProduced?: string[];
+	usage?: { inputTokens: number; outputTokens: number; durationMs: number };
+}
+
 export interface DependencyOutputContext {
-	dependencies: Array<{ taskId: string; title: string; status: string; result?: string; resultPath?: string }>;
+	dependencies: DependencyContextEntry[];
 	sharedReads: Array<{ name: string; path: string; content: string }>;
 }
 
@@ -44,16 +55,52 @@ export function sharedPath(manifest: TeamRunManifest, name: string): string {
 	return resolved;
 }
 
+function tryParseJson(text: string): Record<string, unknown> | undefined {
+	try {
+		const parsed = JSON.parse(text);
+		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+	} catch {
+		// Not valid JSON object — return undefined.
+	}
+	return undefined;
+}
+
+function listTaskArtifacts(manifest: TeamRunManifest, taskId: string): string[] | undefined {
+	const produced = manifest.artifacts.filter((a) => a.producer === taskId);
+	if (produced.length === 0) return undefined;
+	return produced.map((a) => {
+		const relative = path.relative(manifest.artifactsRoot, a.path);
+		return relative.startsWith("..") ? a.path : relative;
+	});
+}
+
+function aggregateUsage(task: TeamTaskState): DependencyContextEntry["usage"] {
+	if (!task.usage) return undefined;
+	const inputTokens = task.usage.input ?? 0;
+	const outputTokens = task.usage.output ?? 0;
+	const started = task.startedAt ? new Date(task.startedAt).getTime() : 0;
+	const finished = task.finishedAt ? new Date(task.finishedAt).getTime() : 0;
+	const durationMs = started && finished ? finished - started : 0;
+	if (inputTokens === 0 && outputTokens === 0 && durationMs === 0) return undefined;
+	return { inputTokens, outputTokens, durationMs };
+}
+
 export function collectDependencyOutputContext(manifest: TeamRunManifest, tasks: TeamTaskState[], task: TeamTaskState, step: WorkflowStep): DependencyOutputContext {
 	const byStep = new Map(tasks.map((item) => [item.stepId, item]).filter((entry): entry is [string, TeamTaskState] => Boolean(entry[0])));
 	const byId = new Map(tasks.map((item) => [item.id, item]));
-	const dependencies = task.dependsOn.map((dep) => byStep.get(dep) ?? byId.get(dep)).filter((item): item is TeamTaskState => Boolean(item)).map((item) => ({
-		taskId: item.id,
-		title: item.title,
-		status: item.status,
-		resultPath: item.resultArtifact?.path,
-		result: item.resultArtifact ? readIfSmall(item.resultArtifact.path, 24_000, manifest.artifactsRoot) : undefined,
-	}));
+	const dependencies = task.dependsOn.map((dep) => byStep.get(dep) ?? byId.get(dep)).filter((item): item is TeamTaskState => Boolean(item)).map((item) => {
+		const resultText = item.resultArtifact ? readIfSmall(item.resultArtifact.path, 24_000, manifest.artifactsRoot) : undefined;
+		return {
+			taskId: item.id,
+			role: item.role,
+			status: item.status,
+			resultSummary: resultText ?? "",
+			resultPath: item.resultArtifact?.path,
+			structuredResults: resultText ? tryParseJson(resultText) : undefined,
+			artifactsProduced: listTaskArtifacts(manifest, item.id),
+			usage: aggregateUsage(item),
+		};
+	});
 	const sharedReads = (step.reads === false ? [] : step.reads ?? []).map((name) => {
 		const filePath = sharedPath(manifest, name);
 		return { name, path: filePath, content: readIfSmall(filePath, 24_000, path.resolve(manifest.artifactsRoot, "shared")) ?? "" };
@@ -66,7 +113,10 @@ export function renderDependencyOutputContext(context: DependencyOutputContext):
 	if (context.dependencies.length) {
 		parts.push("# Dependency Outputs", "");
 		for (const dep of context.dependencies) {
-			parts.push(`## ${dep.taskId} (${dep.title})`, `Status: ${dep.status}`, dep.resultPath ? `Result artifact: ${dep.resultPath}` : "", "", dep.result?.trim() || "(no result output)", "");
+			parts.push(`## ${dep.taskId} (${dep.role})`, `Status: ${dep.status}`, dep.resultPath ? `Result artifact: ${dep.resultPath}` : "", "", dep.resultSummary?.trim() || "(no result output)", "");
+			if (dep.structuredResults) parts.push("Structured results:", JSON.stringify(dep.structuredResults, null, 2), "");
+			if (dep.artifactsProduced?.length) parts.push(`Artifacts produced: ${dep.artifactsProduced.join(", ")}`, "");
+			if (dep.usage) parts.push(`Usage: ${dep.usage.inputTokens} input tokens, ${dep.usage.outputTokens} output tokens, ${dep.usage.durationMs}ms`, "");
 		}
 	}
 	if (context.sharedReads.length) {

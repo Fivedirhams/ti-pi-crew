@@ -278,7 +278,8 @@ class CrewWidgetComponent implements WidgetComponent {
 		// Update only spinner and command icon on header line to avoid full re-color for every frame.
 		const updatedHeader = `${runningGlyph}${this.cachedBaseLines[0]?.slice(1) ?? ""}`;
 		this.cachedLines[0] = truncate(colorWidgetLine(updatedHeader, 0, this.theme), width);
-		return this.cachedLines;
+		// Safety: ensure all lines fit within terminal width (handles emoji/CJK width mismatch)
+		return this.cachedLines.map((line) => truncate(line, width));
 	}
 }
 
