@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## 0.1.48
+
+### Added
+
+- **Yield-based completion contract** — Workers can call `submit_result` tool to return structured results; task-runner warns on workers that don't yield.
+- **Typed event channels** — `RunEventBus` supports 5 channels (`worker:progress`, `worker:lifecycle`, `worker:stream`, `run:state`, `ui:invalidate`) with `onChannel`/`onChannelForRun` subscriptions and auto-classification.
+- **Human-readable task names** — `generateTaskName()` produces AdjectiveNoun names (14,400 combinations); `displayName` field on `TeamTaskState`.
+- **SubprocessToolRegistry** — Extensible tool event handling with `register`/`extractAll`/`shouldTerminate` pattern; wired into event-stream-bridge.
+- **Event log rotation/compaction** — Auto-compacts event logs over 5MB/50k events, keeping last 1000 events; atomic file replacement.
+- **Incremental JSONL reader** — `readLinesSince`/`readJsonlSince` for seek-based file reading; wired into `readEventsCursor` with `fromByteOffset`.
+
+### Fixed
+
+- Fixed `readBlob`/`readBlobMetadata` crash on missing files — now returns `undefined`.
+- Fixed `readSseJson` crash on non-JSON SSE data — now skips malformed events.
+- Fixed wrong value `"long_running"` → `"active_long_running"` in agent-control.
+- Fixed `consecutiveFailures` type bypass — added to `CrewAgentProgress` interface.
+- Fixed `streamBridge.dispose()` memory leak — now in try/finally.
+- Fixed blob-store redundant ternary `typeof x === "string" ? x : x`.
+- Fixed team-runner non-null assertion on potentially empty array.
+- Fixed event-log silent error swallowing — now logs via `logInternalError`.
+- Fixed team-tool switch case indentation.
+- Removed dead code `expandIcon` in agent-management-overlay.
+
+### Changed
+
+- Moved 6 research .md files from repo root to `docs/research/`.
+- `discoverAgents`/`discoverSkills` silent catches now log via `logInternalError`.
+- `executeHook` accumulates non-blocking diagnostics instead of short-circuiting.
+- `CancellationToken.heartbeat` wired into `collectRuns` and `pruneFinishedRuns`.
+- `CapabilitySource` extended with `"git"` to match `ResourceSource`.
+
 ## 0.1.47
 
 ### Added
