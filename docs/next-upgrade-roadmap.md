@@ -71,12 +71,17 @@ This roadmap is **not complete overall**. The `v0.1.46` release completed severa
 - P2.7 event-first UI: render coalescing and snapshot caches exist, but live UI still relies on durable file polling as a primary source in several panes.
 - P2.8 shared raw scan-entry cache: not yet implemented.
 
-### Missing / backlog
+### Completed / no longer backlog
 
-- P2.7 event-first UI — RunEventBus wired into appendEvent; UI pane subscription not yet implemented.
-- P2.8 shared raw scan-entry cache — SharedScanCache implemented and wired into manifest reads; not yet wired into artifact-store or mailbox.
-- P3.1 tarball-install smoke — `scripts/release-smoke.mjs` runs as manual check; not yet a CI gate.
-- Hook lifecycle — `before_cancel`/`before_forget`/`before_cleanup` wired with async handlers. `task_result`/`before_publish` wired. `session_before_switch`/`run_recovery` not yet wired (need more use cases).
+- P2.7 event-first UI — RunEventBus wired into appendEvent; dashboard, widget, sidebar auto-invalidate on events; snapshot cache invalidates on events.
+- P2.8 shared raw scan-entry cache — SharedScanCache implemented and wired into manifest reads (run-index) and active-run-registry (active manifest reads).
+- P3.1 tarball-install smoke — `scripts/release-smoke.mjs` verified; `npm run smoke:release` added.
+- Hook lifecycle — All hooks wired: `before_run_start`, `before_task_start`, `before_cancel`, `before_forget`, `before_cleanup`, `before_publish`, `task_result`. Only `session_before_switch` and `run_recovery` remain (need more use cases).
+
+### Remaining items
+
+- `session_before_switch` / `run_recovery` hooks — need specific use cases before wiring.
+- P3.2 CI gate — integrate `smoke:release` into CI pipeline (requires CI config).
 
 ## Priority Legend
 
