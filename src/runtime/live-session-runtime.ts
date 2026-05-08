@@ -149,15 +149,87 @@ function modelFromRegistry(modelRegistry: unknown, modelId: string | undefined):
 	}
 }
 
+/** Communication intensity by role (caveman-inspired token optimization) */
+const ROLE_INTENSITY: Record<string, "lite" | "full" | "ultra"> = {
+	explorer: "ultra",
+	analyst: "full",
+	planner: "full",
+	critic: "full",
+	executor: "full",
+	reviewer: "full",
+	"security-reviewer": "full",
+	"test-engineer": "full",
+	verifier: "full",
+	writer: "lite",
+};
+
+function buildCommunicationStyle(role: string): string {
+	const intensity = ROLE_INTENSITY[role] ?? "full";
+	if (intensity === "lite") return "## Communication\nProfessional concise. No filler/hedging. Full sentences OK.";
+	if (intensity === "ultra") return [
+		"## Communication (ultra-compressed)",
+		"Drop: articles, filler, hedging, pleasantries. Fragments OK.",
+		"Pattern: [thing] [action] [reason].",
+		"Code/paths/symbols: exact, never abbreviated. Errors quoted exact.",
+		"Abbreviate prose words: DB/auth/config/req/res/fn/impl.",
+		"Arrows for causality: X → Y. One word when one word enough.",
+		"Security/destructive: write normal English. Resume compressed after.",
+	].join("\n");
+	return [
+		"## Communication (compressed)",
+		"Drop: articles (a/an/the), filler (just/really/basically/actually/simply), hedging, pleasantries.",
+		"Short synonyms. Fragments OK. Pattern: [thing] [action] [reason]. [next step].",
+		"Code/paths/symbols: exact. Errors quoted exact.",
+		"Security/destructive: write normal English. Resume compressed after.",
+	].join("\n");
+}
+
+function buildOutputContract(role: string): string {
+	if (role === "explorer") return [
+		"## Output Contract",
+		"<path>:<line> — `<symbol>` — <≤6 word note>",
+		"Group: Defs: / Refs: / Callers: / Tests: / Sites:",
+		"Zero hits → \"No match.\"",
+		"Last line → totals: N defs, M refs.",
+	].join("\n");
+	if (role === "executor") return [
+		"## Output Contract",
+		"<path>:<line-range> — <change ≤10 words>.",
+		"verified: <re-read OK | mismatch @ path:line>.",
+		"Refusal tokens: too-big. / needs-confirm. / ambiguous. / regressed.",
+	].join("\n");
+	if (role === "reviewer" || role === "security-reviewer") return [
+		"## Output Contract",
+		"<path>:<line>: <emoji> <severity>: <problem>. <fix>.",
+		"Severity: 🔴 bug, 🟡 risk, 🔵 nit, ❓ question.",
+		"Zero findings → \"No issues.\"",
+		"Sorted: file order → ascending line numbers.",
+	].join("\n");
+	if (role === "verifier") return [
+		"## Output Contract",
+		"PASS: <what verified> — <evidence ≤20 words>.",
+		"FAIL: <what failed> — <reason>. <expected vs actual>.",
+		"Evidence: file paths, test output, or diffs.",
+	].join("\n");
+	if (role === "writer") return "## Output Contract\nWrite clear documentation. Full sentences. No compression.";
+	return ""; // planner, critic, analyst, test-engineer: no strict format
+}
+
 function liveSystemPrompt(input: LiveSessionSpawnInput): string {
 	const memory = input.agent.memory ? buildMemoryBlock(input.agent.name, input.agent.memory, input.task.cwd, Boolean(input.agent.tools?.some((tool) => tool === "write" || tool === "edit"))) : "";
+	const role = input.task.role;
+	const styleBlock = buildCommunicationStyle(role);
+	const contractBlock = buildOutputContract(role);
 	return [
 		"# pi-crew Live Subagent",
 		`Run ID: ${input.manifest.runId}`,
 		`Task ID: ${input.task.id}`,
-		`Role: ${input.task.role}`,
+		`Role: ${role}`,
 		`Agent: ${input.agent.name}`,
 		`Working directory: ${input.task.cwd}`,
+		"",
+		styleBlock,
+		contractBlock,
 		"",
 		input.agent.systemPrompt || "Follow the user task exactly and report verification evidence.",
 		memory ? `\n${memory}` : "",
