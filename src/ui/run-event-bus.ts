@@ -115,11 +115,12 @@ class RunEventBus {
 	}
 
 	emit(event: RunEventPayload): void {
-		// Auto-classify channel if not already set
+		// Auto-classify channel if not already set.
+		// M2: Use local variable for routing, but also set on event
+		// for subscriber API contract (listeners read event.channel).
 		if (!event.channel) {
 			(event as { channel?: EventChannel }).channel = classifyEventChannel(event.type);
 		}
-
 		const channel = event.channel!;
 
 		// Existing: runId-specific listeners

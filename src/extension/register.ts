@@ -37,7 +37,7 @@ import { createMetricFileSink, type MetricSink } from "../observability/metric-s
 import { OTLPExporter } from "../observability/exporters/otlp-exporter.ts";
 import { HeartbeatWatcher } from "../runtime/heartbeat-watcher.ts";
 import { appendDeadletter } from "../runtime/deadletter.ts";
-import { detectInterruptedRuns } from "../runtime/crash-recovery.ts";
+import { cancelOrphanedRuns, detectInterruptedRuns, purgeStaleActiveRunIndex } from "../runtime/crash-recovery.ts";
 import { DeliveryCoordinator } from "../runtime/delivery-coordinator.ts";
 import { OverflowRecoveryTracker } from "../runtime/overflow-recovery.ts";
 import { tryRegisterSessionCleanup } from "../runtime/session-resources.ts";
@@ -351,6 +351,17 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 		if (preloadTimer) { clearTimeout(preloadTimer); preloadTimer = undefined; }
 		stopSessionBoundSubagents();
 		stopAsyncRunNotifier(notifierState);
+
+		// P0: Purge all stale active-run-index entries on session cleanup.
+		// This handles: normal exit, SIGTERM, Ctrl+C — any case where cleanupRuntime fires.
+		// For SIGKILL / crash / SIGHUP (where cleanupRuntime does NOT fire),
+		// purgeStaleActiveRunIndex() runs at next session_start instead.
+		try {
+			purgeStaleActiveRunIndex();
+		} catch {
+			// Best-effort — must not block cleanup
+		}
+
 		stopCrewWidget(currentCtx, widgetState, currentCtx ? loadConfig(currentCtx.cwd).config.ui : undefined);
 		clearPiCrewPowerbar(pi.events, currentCtx);
 		disposePowerbarCoalescer();
@@ -396,6 +407,30 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 		if (widgetState.interval) clearInterval(widgetState.interval);
 		widgetState.interval = undefined;
 		notifyActiveRuns(ctx);
+
+		// Auto-cancel orphaned runs from dead sessions
+		const currentSessionId = (ctx as unknown as Record<string, unknown>).sessionId as string | undefined;
+		if (currentSessionId) {
+			try {
+				const { cancelled } = cancelOrphanedRuns(ctx.cwd, getManifestCache(ctx.cwd), currentSessionId);
+				if (cancelled.length > 0) {
+					notifyOperator({ id: `orphan_cleanup`, severity: "info", source: "crash-recovery", title: `Cleaned up ${cancelled.length} orphaned run(s)`, body: `Runs from previous sessions were auto-cancelled: ${cancelled.join(", ")}` });
+				}
+			} catch {
+				// Orphan cleanup should not block session start
+			}
+		}
+
+		// Global purge of stale active-run-index entries (temp dirs, dead workers, etc.)
+		try {
+			const { purged } = purgeStaleActiveRunIndex();
+			if (purged.length > 0) {
+				notifyOperator({ id: `active_index_purge`, severity: "info", source: "crash-recovery", title: `Purged ${purged.length} stale active-run-index entr${purged.length === 1 ? "y" : "ies"}`, body: `Cleaned up global active run index` });
+			}
+		} catch {
+			// Global index purge should not block session start
+		}
+
 		const loadedConfig = loadConfig(ctx.cwd);
 		autoRecoveryLast.clear();
 		configureNotifications(ctx);

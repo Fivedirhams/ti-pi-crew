@@ -9,6 +9,16 @@ import { resolveCrewRuntime, runtimeResolutionState } from "./runtime-resolver.t
 import { directTeamAndWorkflowFromRun } from "./direct-run.ts";
 import { expandParallelResearchWorkflow } from "./parallel-research.ts";
 import { writeAsyncStartMarker } from "./async-marker.ts";
+import { startParentGuard, stopParentGuard } from "./parent-guard.ts";
+
+/**
+ * Remove macOS malloc-stack-logging vars that get inherited by child shells.
+ * Without this, every subprocess prints "MallocStackLogging: can't turn off..." to stderr.
+ */
+function scrubProcessEnv(): void {
+	delete process.env.MallocStackLogging;
+	delete process.env.MallocStackLoggingNoCompact;
+}
 
 function argValue(name: string): string | undefined {
 	const index = process.argv.indexOf(name);
@@ -17,6 +27,13 @@ function argValue(name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+	// Scrub macOS malloc vars BEFORE anything else — must be clean for all child processes
+	scrubProcessEnv();
+
+	// Start parent guard FIRST — if parent is already dead, exit immediately
+	const parentPid = Number(process.env.PI_CREW_PARENT_PID);
+	if (parentPid > 0) startParentGuard(parentPid);
+
 	const cwd = argValue("--cwd");
 	const runId = argValue("--run-id");
 	if (!cwd || !runId) throw new Error("Usage: background-runner.ts --cwd <cwd> --run-id <runId>");
@@ -53,6 +70,8 @@ async function main(): Promise<void> {
 		manifest = updateRunStatus(manifest, "failed", message);
 		appendEvent(manifest.eventsPath, { type: "async.failed", runId: manifest.runId, message });
 		process.exitCode = 1;
+	} finally {
+		stopParentGuard();
 	}
 }
 

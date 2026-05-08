@@ -32,9 +32,6 @@ export function runtimeResolutionState(runtime: CrewRuntimeCapabilities, resolve
 }
 
 export async function isLiveSessionRuntimeAvailable(timeoutMs = 1500, env: NodeJS.ProcessEnv = process.env): Promise<{ available: boolean; reason?: string }> {
-	if (env.PI_CREW_ENABLE_EXPERIMENTAL_LIVE_SESSION !== "1") {
-		return { available: false, reason: "Live-session runtime adapter is experimental and disabled. Set PI_CREW_ENABLE_EXPERIMENTAL_LIVE_SESSION=1 to probe SDK support." };
-	}
 	if (env.PI_CREW_MOCK_LIVE_SESSION === "success") {
 		return { available: true, reason: "Mock live-session runtime is enabled." };
 	}

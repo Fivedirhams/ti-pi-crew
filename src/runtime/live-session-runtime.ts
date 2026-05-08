@@ -12,6 +12,14 @@ import type { WorkflowStep } from "../workflows/workflow-config.ts";
 import { isLiveSessionRuntimeAvailable } from "./runtime-resolver.ts";
 import { redactSecrets } from "../utils/redaction.ts";
 import { buildConfiguredModelRouting } from "./model-fallback.ts";
+import { DEFAULT_LIVE_SESSION } from "../config/defaults.ts";
+import { buildYieldReminder, hasYieldInOutput, isYieldEvent, extractYieldResult, validateYieldData, DEFAULT_YIELD_CONFIG, type YieldResult } from "./yield-handler.ts";
+import { buildMcpProxyFromSession } from "./mcp-proxy.ts";
+import { createSubmitResultTool } from "./custom-tools/submit-result-tool.ts";
+import { createIrcTool } from "./custom-tools/irc-tool.ts";
+import { buildExtensionBridge } from "./live-extension-bridge.ts";
+import { collectLiveSessionHealth, formatLiveSessionDiagnostics, type LiveSessionHealth } from "./live-session-health.ts";
+import { listLiveAgents } from "./live-agent-manager.ts";
 
 export interface LiveSessionSpawnInput {
 	manifest: TeamRunManifest;
@@ -30,6 +38,8 @@ export interface LiveSessionSpawnInput {
 	modelOverride?: string;
 	teamRoleModel?: string;
 	isCurrent?: () => boolean;
+	/** Phase 2: Output schema for validating yield data. */
+	outputSchema?: unknown;
 }
 
 export interface LiveSessionRunResult {
@@ -40,6 +50,8 @@ export interface LiveSessionRunResult {
 	jsonEvents: number;
 	usage?: UsageState;
 	error?: string;
+	/** Phase 1: Extracted yield result from submit_result tool call. */
+	yieldResult?: YieldResult;
 }
 
 export interface LiveSessionUnavailableResult {
@@ -174,11 +186,15 @@ function usageFromStats(stats: unknown): UsageState | undefined {
 export async function probeLiveSessionRuntime(): Promise<LiveSessionUnavailableResult | LiveSessionPlannedResult> {
 	const availability = await isLiveSessionRuntimeAvailable();
 	if (!availability.available) return { available: false, reason: availability.reason ?? "Live-session runtime is unavailable." };
-	return { available: true, reason: "Live-session SDK exports are available and pi-crew can run experimental in-process live agents when runtime.mode=live-session." };
+	return { available: true, reason: "Live-session SDK exports are available. pi-crew can run in-process live agents when runtime.mode=live-session." };
 }
 
 export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<LiveSessionRunResult> {
 	const isCurrent = input.isCurrent ?? (() => true);
+
+	// G1: Capture yield result from custom tool callback
+	let customToolYieldResult: YieldResult | undefined;
+	let customToolYieldResolved = false;
 	if (process.env.PI_CREW_MOCK_LIVE_SESSION === "success") {
 		const agentId = `${input.manifest.runId}:${input.task.id}`;
 		const inherited = input.runtimeConfig?.inheritContext === true && input.parentContext ? ` with inherited context: ${input.parentContext}` : "";
@@ -205,6 +221,8 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 	let controlTimer: ReturnType<typeof setInterval> | undefined;
 	let stdout = "";
 	let jsonEvents = 0;
+	const collectedJsonEvents: Record<string, unknown>[] = [];
+	let yieldResult: YieldResult | undefined;
 	try {
 		const agentDir = typeof mod.getAgentDir === "function" ? mod.getAgentDir() : undefined;
 		let resourceLoader: unknown;
@@ -222,6 +240,19 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 		}
 		const modelRouting = buildConfiguredModelRouting({ overrideModel: input.modelOverride, stepModel: input.step.model, teamRoleModel: input.teamRoleModel, agentModel: input.agent.model, fallbackModels: input.agent.fallbackModels, parentModel: input.parentModel, modelRegistry: input.modelRegistry, cwd: input.manifest.cwd });
 		const resolvedModel = modelFromRegistry(input.modelRegistry, modelRouting.candidates[0] ?? modelRouting.requested) ?? input.parentModel;
+		// Phase 4: MCP proxy — will be determined after session creation
+		// (we check parent's MCP tools and share connections when available)
+		const mcpProxy = buildMcpProxyFromSession([], { shareMcp: true });
+
+		// G1: Build custom tools (submit_result + irc)
+		const agentId = `${input.manifest.runId}:${input.task.id}`;
+		const submitResultTool = createSubmitResultTool((result) => {
+			customToolYieldResult = result;
+			customToolYieldResolved = true;
+		});
+		const ircTool = createIrcTool(agentId);
+		const customTools = [submitResultTool, ircTool];
+
 		const created = await mod.createAgentSession({
 			cwd: input.task.cwd,
 			...(agentDir ? { agentDir } : {}),
@@ -231,11 +262,31 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 			...(input.modelRegistry ? { modelRegistry: input.modelRegistry } : {}),
 			...(resolvedModel ? { model: resolvedModel } : {}),
 			...(input.agent.thinking ? { thinkingLevel: input.agent.thinking } : {}),
+			...(mcpProxy.enableMcp ? {} : { enableMCP: false }),
+			customTools,
 		});
 		session = created.session;
 		filterActiveTools(session, input.agent);
 		await session.bindExtensions?.({});
-		const agentId = `${input.manifest.runId}:${input.task.id}`;
+
+		// Phase 5: Initialize extension runner bridge if available
+		// The bridge provides extension-like APIs (sendMessage, setActiveTools, etc.)
+		// to the extension runner if the session exposes one.
+		const extensionBridge = buildExtensionBridge(session as never);
+		if (extensionBridge) {
+			const extRunner = (session as Record<string, unknown>).extensionRunner;
+			if (extRunner && typeof (extRunner as Record<string, unknown>).initialize === "function") {
+				try {
+					(extRunner as { initialize: (apis: unknown, host: unknown) => void }).initialize(extensionBridge.apis, extensionBridge.host);
+					if (typeof (extRunner as Record<string, unknown>).emit === "function") {
+						await (extRunner as { emit: (event: unknown) => Promise<void> }).emit({ type: "session_start" });
+					}
+				} catch {
+					// Extension runner initialization failure should not block the session
+				}
+			}
+		}
+
 		registerLiveAgent({ agentId, runId: input.manifest.runId, taskId: input.task.id, session, status: "running" });
 		let controlCursor: LiveAgentControlCursor = { offset: 0 };
 		const seenControlRequestIds = new Set<string>();
@@ -286,6 +337,10 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 					stdout += `${text}\n`;
 					input.onOutput?.(text);
 				}
+				// Phase 1: collect events for yield detection
+				if (event && typeof event === "object" && !Array.isArray(event)) {
+					collectedJsonEvents.push(event as Record<string, unknown>);
+				}
 			});
 		}
 		if (input.signal) {
@@ -293,17 +348,153 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 			else input.signal.addEventListener("abort", () => { void session?.abort?.(); }, { once: true });
 		}
 		const effectivePrompt = input.runtimeConfig?.inheritContext === true && input.parentContext ? `${input.parentContext}\n\n---\n# Live Subagent Task\n${input.prompt}` : input.prompt;
-		await session.prompt?.(effectivePrompt, { source: "api", expandPromptTemplates: false });
+
+		// Phase 3: Wrap session.prompt with timeout for graceful cancellation
+		const sessionTimeoutMs = DEFAULT_LIVE_SESSION.responseTimeoutMs;
+		const promptPromise = session.prompt?.(effectivePrompt, { source: "api", expandPromptTemplates: false });
+		if (promptPromise) {
+			const timeoutPromise = new Promise<void>((_, reject) => {
+				const timer = setTimeout(() => reject(new Error(`Live-session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
+				timer.unref();
+				input.signal?.addEventListener("abort", () => clearTimeout(timer), { once: true });
+			});
+			try {
+				await Promise.race([promptPromise, timeoutPromise]);
+			} catch (promptError) {
+				const msg = promptError instanceof Error ? promptError.message : String(promptError);
+				if (msg.includes("timed out")) {
+					await session.abort?.();
+					updateLiveAgentStatus(agentId, "failed");
+					return { available: true, exitCode: 1, stdout: stdout.trim(), stderr: msg, jsonEvents, error: msg };
+				}
+				throw promptError;
+			}
+		}
+
+		// --- Phase 1: Yield enforcement loop ---
+		// After the initial prompt completes, check if the worker called submit_result.
+		// Priority: 1) custom tool callback (G1), 2) JSON event detection (legacy).
+		const yieldConfig = input.runtimeConfig?.yield ?? { enabled: DEFAULT_YIELD_CONFIG.enabled };
+		const yieldEnabled = yieldConfig.enabled !== false;
+		if (yieldEnabled && session) {
+			// Check custom tool callback first (G1)
+			if (customToolYieldResolved && customToolYieldResult) {
+				yieldResult = customToolYieldResult;
+			} else {
+				// Legacy: detect from JSON events
+				const alreadyYielded = hasYieldInOutput(collectedJsonEvents);
+				if (alreadyYielded) {
+					const yieldEvent = collectedJsonEvents.find((e) => isYieldEvent(e));
+					if (yieldEvent) yieldResult = extractYieldResult(yieldEvent);
+				}
+			}
+			// Phase 2: Validate yield data against output schema if provided
+			let schemaFailures = 0;
+			const maxSchemaFailures = 2;
+			if (yieldResult && input.outputSchema) {
+				const validation = await validateYieldData(yieldResult.structuredData, input.outputSchema);
+				if (!validation.valid) {
+					schemaFailures++;
+					yieldResult = undefined;
+					customToolYieldResolved = false;
+					const schemaReminder = `Your submit_result data did not match the required schema: ${validation.error}. Please fix and call submit_result again with valid data.`;
+					try {
+						await session.prompt?.(schemaReminder, { source: "api", expandPromptTemplates: false });
+					} catch {
+						/* ignore */
+					}
+					await new Promise((resolve) => setTimeout(resolve, DEFAULT_LIVE_SESSION.yieldPollIntervalMs));
+					// Check again after schema reminder
+					if (customToolYieldResolved && customToolYieldResult) {
+						yieldResult = customToolYieldResult;
+					} else {
+						const newEvents = collectedJsonEvents.slice(-10);
+						if (hasYieldInOutput(newEvents)) {
+							const yieldEvent = newEvents.find((e) => isYieldEvent(e));
+							if (yieldEvent) {
+								const candidate = extractYieldResult(yieldEvent);
+								if (candidate && input.outputSchema) {
+									const revalidation = await validateYieldData(candidate.structuredData, input.outputSchema);
+									if (revalidation.valid || schemaFailures >= maxSchemaFailures) {
+										yieldResult = candidate;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			// Reminder loop — only if yield not yet received
+			const maxReminders = yieldConfig.maxReminders ?? DEFAULT_LIVE_SESSION.maxYieldRetries;
+			let retryCount = 0;
+			while (!customToolYieldResolved && !yieldResult && retryCount < maxReminders && !input.signal?.aborted) {
+				retryCount++;
+				const reminder = buildYieldReminder(retryCount, maxReminders, yieldConfig.reminderPrompt);
+				try {
+					// G6: Constrain tool set to submit_result before sending reminder
+					const prevTools = typeof session.getActiveToolNames === "function" ? session.getActiveToolNames() : [];
+					if (typeof session.setActiveToolsByName === "function" && prevTools.length > 0) {
+						session.setActiveToolsByName(["submit_result"]);
+					}
+					await session.prompt?.(reminder, { source: "api", expandPromptTemplates: false });
+					// Restore previous tools
+					if (typeof session.setActiveToolsByName === "function" && prevTools.length > 0) {
+						session.setActiveToolsByName(prevTools);
+					}
+				} catch {
+					break;
+				}
+				const pollInterval = DEFAULT_LIVE_SESSION.yieldPollIntervalMs;
+				await new Promise((resolve) => setTimeout(resolve, pollInterval));
+				// Check custom tool callback
+				if (customToolYieldResolved && customToolYieldResult) {
+					yieldResult = customToolYieldResult;
+					break;
+				}
+				// Legacy: check JSON events
+				if (hasYieldInOutput(collectedJsonEvents.slice(-10))) {
+					const yieldEvent = collectedJsonEvents.slice(-10).find((e) => isYieldEvent(e));
+					if (yieldEvent) yieldResult = extractYieldResult(yieldEvent);
+					break;
+				}
+			}
+			if (!customToolYieldResolved && !yieldResult && !input.signal?.aborted && retryCount >= maxReminders) {
+				input.onEvent?.({ type: "task.attention", runId: input.manifest.runId, taskId: input.task.id, message: "Live-session worker completed without calling submit_result tool.", data: { activityState: "needs_attention", reason: "no_yield", attempts: retryCount } });
+			}
+		}
+
 		const usage = usageFromStats(typeof session.getStats === "function" ? session.getStats() : session.stats);
 		updateLiveAgentStatus(agentId, "completed");
-		return { available: true, exitCode: 0, stdout: stdout.trim(), stderr: created.modelFallbackMessage ?? "", jsonEvents, usage };
+	return { available: true, exitCode: 0, stdout: stdout.trim(), stderr: created.modelFallbackMessage ?? "", jsonEvents, usage, yieldResult };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
+
+		// Phase 8: Log diagnostics on failure
+		try {
+			const agents = listLiveAgents();
+			const health = collectLiveSessionHealth(agents, () => undefined);
+			const diagnostics = formatLiveSessionDiagnostics(health);
+			input.onEvent?.({ type: "live-session.diagnostics", data: diagnostics });
+		} catch {
+			// Diagnostics collection should not affect error handling
+		}
+
 		updateLiveAgentStatus(`${input.manifest.runId}:${input.task.id}`, "failed");
 		return { available: true, exitCode: 1, stdout: stdout.trim(), stderr: message, jsonEvents, error: message };
 	} finally {
 		if (controlTimer) clearInterval(controlTimer);
 		unsubscribeControlRealtime?.();
 		unsubscribe?.();
+
+		// Phase 8: Emit final health snapshot
+		try {
+			const agents = listLiveAgents();
+			if (agents.length > 0) {
+				const health = collectLiveSessionHealth(agents, () => undefined);
+				input.onEvent?.({ type: "live-session.health", data: health });
+			}
+		} catch {
+			// Health snapshot should not affect cleanup
+		}
 	}
 }

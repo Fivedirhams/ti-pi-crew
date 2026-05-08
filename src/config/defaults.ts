@@ -12,6 +12,17 @@ export const DEFAULT_CHILD_PI = {
 	maxCompactContentChars: 4096,
 };
 
+export const DEFAULT_LIVE_SESSION = {
+	/** Maximum wall-clock time for a single live-session task before abort (ms). */
+	responseTimeoutMs: 5 * 60_000,
+	/** Maximum yield reminder attempts before accepting no-yield. */
+	maxYieldRetries: 3,
+	/** Polling interval for session idle check during yield enforcement (ms). */
+	yieldPollIntervalMs: 500,
+	/** Maximum time to wait for session idle after prompt (ms). */
+	idleWaitTimeoutMs: 60_000,
+};
+
 export const DEFAULT_LOCKS = {
 	staleMs: 30_000,
 };

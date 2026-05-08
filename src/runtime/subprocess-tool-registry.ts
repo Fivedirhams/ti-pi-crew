@@ -17,6 +17,8 @@ export interface SubprocessToolRegistry {
 	hasHandler(toolName: string): boolean;
 	getRegisteredTools(): string[];
 	extractAll(event: SubprocessToolEvent): Record<string, unknown>;
+	/** H3: Clear all registered handlers (for test isolation). */
+	clear(): void;
 }
 
 class SubprocessToolRegistryImpl implements SubprocessToolRegistry {
@@ -50,6 +52,16 @@ class SubprocessToolRegistryImpl implements SubprocessToolRegistry {
 		}
 		return extracted;
 	}
+
+	/** H3: Clear all registered handlers (for test isolation). */
+	clear(): void {
+		this.handlers.clear();
+	}
 }
 
 export const subprocessToolRegistry: SubprocessToolRegistry = new SubprocessToolRegistryImpl();
+
+/** H3: Reset the global singleton registry (for test isolation). */
+export function resetSubprocessToolRegistry(): void {
+	subprocessToolRegistry.clear();
+}

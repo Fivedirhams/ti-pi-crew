@@ -112,7 +112,7 @@ export interface ChildPiRunResult {
 export function buildChildPiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): SpawnOptions {
 	return {
 		cwd,
-		env,
+		env: { ...env, PI_CREW_PARENT_PID: String(process.pid) },
 		stdio: ["ignore", "pipe", "pipe"],
 		detached: process.platform !== "win32",
 		windowsHide: true,

@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import * as fs from "node:fs";
 import type { MetricRegistry } from "../observability/metric-registry.ts";
 import { appendEvent, scanSequence } from "../state/event-log.ts";
 import { withRunLockSync } from "../state/locks.ts";
@@ -9,6 +10,7 @@ import type { ManifestCache } from "./manifest-cache.ts";
 import { checkProcessLiveness } from "./process-status.ts";
 import { reconcileStaleRun, type ReconcileResult } from "./stale-reconciler.ts";
 import { executeHook, appendHookEvent } from "../hooks/registry.ts";
+import { activeRunEntries, unregisterActiveRun, readActiveRunRegistry } from "../state/active-run-registry.ts";
 
 export interface RecoveryPlan {
 	runId: string;
@@ -71,6 +73,176 @@ export function declineRecoveryPlan(plan: RecoveryPlan, ctx: Pick<ExtensionConte
  * Run 3-phase stale reconciliation on all active runs.
  * Returns results for each reconciled run.
  */
+/**
+ * Auto-cancel orphaned runs whose owner session no longer exists.
+ *
+ * When a Pi session dies (crash, force-close, Ctrl+C), `session_shutdown`
+ * does not fire and child workers are not terminated. The next Pi session
+ * must detect these orphaned runs and cancel them.
+ *
+ * Criteria for orphan detection:
+ * 1. Manifest status is "running"
+ * 2. Manifest has an `ownerSessionId` that is NOT the current session
+ * 3. The owner session's process is no longer alive (PID check)
+ * 4. No recent heartbeat activity (task heartbeat or agent progress within threshold)
+ *
+ * Returns the number of runs cancelled.
+ */
+export function cancelOrphanedRuns(
+	cwd: string,
+	manifestCache: ManifestCache,
+	currentSessionId: string,
+	staleThresholdMs = 300_000,
+	now = Date.now(),
+): { cancelled: string[]; skipped: string[] } {
+	const cancelled: string[] = [];
+	const skipped: string[] = [];
+
+	// Phase 1: Scan project-level manifests via manifestCache
+	for (const manifest of manifestCache.list(50)) {
+		if (manifest.status !== "running") continue;
+
+		// Only consider runs owned by a different session
+		const ownerId = manifest.ownerSessionId;
+		if (!ownerId || ownerId === currentSessionId) continue;
+
+		// Check if the owner process is still alive
+		const ownerPid = manifest.async?.pid;
+		if (ownerPid !== undefined && checkProcessLiveness(ownerPid).alive) {
+			skipped.push(manifest.runId);
+			continue;
+		}
+
+		// Check for recent heartbeat activity
+		const loaded = loadRunManifestById(cwd, manifest.runId);
+		if (!loaded) continue;
+
+		const hasRecentActivity = loaded.tasks.some((task) => {
+			if (task.status !== "running" && task.status !== "waiting") return false;
+			const heartbeatAt = task.heartbeat?.lastSeenAt ? new Date(task.heartbeat.lastSeenAt).getTime() : Number.NaN;
+			if (task.heartbeat?.alive !== false && Number.isFinite(heartbeatAt) && now - heartbeatAt <= staleThresholdMs) return true;
+			const activityAt = task.agentProgress?.lastActivityAt ? new Date(task.agentProgress.lastActivityAt).getTime() : Number.NaN;
+			return Number.isFinite(activityAt) && now - activityAt <= staleThresholdMs;
+		});
+
+		if (hasRecentActivity) {
+			skipped.push(manifest.runId);
+			continue;
+		}
+
+		// Orphan confirmed — cancel all running tasks
+		withRunLockSync(loaded.manifest, () => {
+			const fresh = loadRunManifestById(cwd, manifest.runId);
+			if (!fresh || fresh.manifest.status !== "running") return;
+
+			const now_iso = new Date(now).toISOString();
+			const repairedTasks = fresh.tasks.map((task) => {
+				if (task.status === "running" || task.status === "queued" || task.status === "waiting") {
+					return { ...task, status: "cancelled" as const, finishedAt: now_iso, error: `Orphaned run: owner session ${ownerId} no longer exists` };
+				}
+				return task;
+			});
+
+			saveRunTasks(fresh.manifest, repairedTasks);
+			updateRunStatus(fresh.manifest, "cancelled", `Orphaned run: owner session ${ownerId} no longer exists`);
+			appendEvent(fresh.manifest.eventsPath, { type: "crew.run.orphan_cancelled", runId: manifest.runId, message: `Auto-cancelled orphaned run (owner: ${ownerId})`, data: { ownerSessionId: ownerId, cancelledTasks: repairedTasks.filter((t) => t.status === "cancelled").length } });
+			cancelled.push(manifest.runId);
+		});
+	}
+
+	return { cancelled, skipped };
+}
+
+/**
+ * Purge the global active-run-index of entries whose manifest is no longer active.
+ *
+ * This scans every entry in active-run-index.json and removes any whose:
+ * - manifest file no longer exists, OR
+ * - manifest status is terminal (completed/failed/cancelled/blocked), OR
+ * - manifest cwd directory no longer exists (e.g. temp test dirs)
+ *
+ * Also removes entries where the manifest is still "running" but:
+ * - The cwd has been deleted (temp dir cleanup)
+ * - The async worker PID is dead AND no heartbeat for > threshold
+ *
+ * This is the **global** cleanup that cancelOrphanedRuns (project-scoped)
+ * cannot reach.
+ */
+export function purgeStaleActiveRunIndex(staleThresholdMs = 300_000, now = Date.now()): { purged: string[]; kept: string[] } {
+	const purged: string[] = [];
+	const kept: string[] = [];
+	const entries = readActiveRunRegistry();
+
+	for (const entry of entries) {
+		// 1. Manifest file gone → definitely stale
+		if (!fs.existsSync(entry.manifestPath)) {
+			unregisterActiveRun(entry.runId);
+			purged.push(entry.runId);
+			continue;
+		}
+
+		// 2. CWD gone → temp dir cleaned up
+		if (!fs.existsSync(entry.cwd)) {
+			unregisterActiveRun(entry.runId);
+			purged.push(entry.runId);
+			continue;
+		}
+
+		// 3. Read manifest status
+		let manifest: { status?: string; async?: { pid?: number }; ownerSessionId?: string } | undefined;
+		try {
+			manifest = JSON.parse(fs.readFileSync(entry.manifestPath, "utf-8"));
+		} catch {
+			unregisterActiveRun(entry.runId);
+			purged.push(entry.runId);
+			continue;
+		}
+
+		// 4. Terminal status → no longer active
+		const terminalStatuses = new Set(["completed", "failed", "cancelled", "blocked"]);
+		if (manifest && terminalStatuses.has(manifest.status ?? "")) {
+			unregisterActiveRun(entry.runId);
+			purged.push(entry.runId);
+			continue;
+		}
+
+		// 5. Still "running" — check if worker PID is dead and no heartbeat
+		if (manifest?.status === "running" && manifest.async?.pid !== undefined) {
+			const pidAlive = checkProcessLiveness(manifest.async.pid).alive;
+			if (!pidAlive) {
+				// Check age — if manifest hasn't been updated in > threshold, it's stale
+				const updatedAt = new Date(entry.updatedAt).getTime();
+				if (Number.isFinite(updatedAt) && now - updatedAt > staleThresholdMs) {
+					// Dead PID + stale update → cancel the manifest and unregister
+					try {
+						const fullLoaded = loadRunManifestById(entry.cwd, entry.runId);
+						if (fullLoaded) {
+							const now_iso = new Date(now).toISOString();
+							const repairedTasks = fullLoaded.tasks.map((task) => {
+								if (task.status === "running" || task.status === "queued" || task.status === "waiting") {
+									return { ...task, status: "cancelled" as const, finishedAt: now_iso, error: "Orphaned run: worker process dead and no recent activity" };
+								}
+								return task;
+							});
+							saveRunTasks(fullLoaded.manifest, repairedTasks);
+							updateRunStatus(fullLoaded.manifest, "cancelled", "Orphaned run: worker process dead and no recent activity");
+						}
+					} catch {
+						// Best-effort manifest cleanup
+					}
+					unregisterActiveRun(entry.runId);
+					purged.push(entry.runId);
+					continue;
+				}
+			}
+		}
+
+		kept.push(entry.runId);
+	}
+
+	return { purged, kept };
+}
+
 export function reconcileAllStaleRuns(cwd: string, manifestCache: ManifestCache, now = Date.now()): ReconcileResult[] {
 	const results: ReconcileResult[] = [];
 	for (const manifest of manifestCache.list(50)) {

@@ -58,6 +58,63 @@ export async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: 
 	return results;
 }
 
+/**
+ * Phase 6: mapConcurrent with AbortSignal and fail-fast support.
+ * On abort: returns partial results (may contain undefined entries).
+ * On error: throws immediately (fail-fast) and cancels remaining work.
+ */
+export async function mapConcurrentWithSignal<T, R>(
+	items: T[],
+	limit: number,
+	fn: (item: T, i: number, signal: AbortSignal) => Promise<R>,
+	signal?: AbortSignal,
+): Promise<{ results: (R | undefined)[]; aborted: boolean }> {
+	const safeLimit = Math.max(1, Math.floor(limit) || 1);
+	const results: (R | undefined)[] = new Array(items.length);
+	let next = 0;
+	let aborted = false;
+
+	const abortController = new AbortController();
+	const workerSignal = signal
+		? AbortSignal.any([signal, abortController.signal])
+		: abortController.signal;
+
+	let rejectFirst: (error: unknown) => void;
+	const firstErrorPromise = new Promise<never>((_, reject) => {
+		rejectFirst = reject;
+	});
+
+	const worker = async (): Promise<void> => {
+		while (!workerSignal.aborted) {
+			const i = next++;
+			if (i >= items.length) return;
+			try {
+				results[i] = await fn(items[i], i, workerSignal);
+			} catch (error) {
+				if (!workerSignal.aborted) {
+					abortController.abort();
+					rejectFirst(error);
+					throw error;
+				}
+			}
+		}
+	};
+
+	const workers = Array.from({ length: Math.min(safeLimit, items.length) }, () => worker());
+
+	try {
+		await Promise.race([Promise.all(workers), firstErrorPromise]);
+	} catch {
+		if (signal?.aborted) {
+			aborted = true;
+			return { results, aborted };
+		}
+		throw undefined;
+	}
+
+	return { results, aborted: signal?.aborted ?? false };
+}
+
 export interface ParallelTaskResult {
 	agent: string;
 	taskIndex?: number;

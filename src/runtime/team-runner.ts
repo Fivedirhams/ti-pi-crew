@@ -507,6 +507,32 @@ function hasPendingMutatingAdaptiveTask(tasks: TeamTaskState[]): boolean {
 export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ manifest: TeamRunManifest; tasks: TeamTaskState[] }> {
 	let workflow = input.workflow;
 	let manifest = updateRunStatus(input.manifest, "running", input.executeWorkers ? "Executing team workflow." : "Creating workflow prompts and placeholder results.");
+
+	try {
+		return await executeTeamRunCore(input, manifest, workflow);
+	} catch (error) {
+		// P1: Catch unhandled errors — ensure manifest is set to "failed" so it doesn't stay "running" forever.
+		const message = error instanceof Error ? error.message : String(error);
+		try {
+			manifest = updateRunStatus(manifest, "failed", `Unhandled error in team runner: ${message}`);
+			await saveRunManifestAsync(manifest);
+		} catch {
+			// Best-effort — state write may also fail
+		}
+		const tasks = refreshTaskGraphQueues(input.tasks).map((task) =>
+			task.status === "running" || task.status === "queued" || task.status === "waiting"
+				? { ...task, status: "failed" as const, finishedAt: new Date().toISOString(), error: message }
+				: task,
+		);
+		return { manifest, tasks };
+	}
+}
+
+async function executeTeamRunCore(
+	input: ExecuteTeamRunInput,
+	manifest: TeamRunManifest,
+	workflow: WorkflowConfig,
+): Promise<{ manifest: TeamRunManifest; tasks: TeamTaskState[] }> {
 	// Execute before_run_start hook (non-blocking by default)
 	const beforeRunReport = await executeHook("before_run_start", { runId: manifest.runId, cwd: manifest.cwd });
 	appendHookEvent(manifest, beforeRunReport);

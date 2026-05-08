@@ -5,6 +5,9 @@ export interface ServerSentEvent {
 	raw: string[];
 }
 
+/** L1: Maximum number of raw lines before discarding an oversized event. */
+const MAX_EVENT_LINES = 1000;
+
 /** Read newline-delimited lines from a text ReadableStream, buffering partial chunks. */
 async function* readLines(
 	stream: ReadableStream<string>,
@@ -93,6 +96,13 @@ export async function* readSseEvents(
 		if (value.startsWith(" ")) value = value.slice(1);
 
 		currentRaw.push(line);
+
+		// L1: Guard against unbounded memory growth
+		if (currentRaw.length > MAX_EVENT_LINES) {
+			const evt = flush();
+			if (evt) yield evt;
+			continue;
+		}
 
 		if (field === "event") {
 			currentEvent = value;

@@ -84,6 +84,8 @@ export async function runLiveTask(input: RunLiveTaskInput): Promise<RunLiveTaskO
 		modelOverride: input.modelOverride,
 		teamRoleModel: input.teamRoleModel,
 		isCurrent,
+		// Phase 2: Pass output schema for yield validation
+		outputSchema: undefined,
 		onOutput: (text) => appendCrewAgentOutput(manifest, task.id, text),
 		onEvent: (event) => {
 			appendCrewAgentEvent(manifest, task.id, event);

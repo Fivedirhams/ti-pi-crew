@@ -68,8 +68,10 @@ export interface TaskRunnerInput {
 
 export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: TeamRunManifest; tasks: TeamTaskState[] }> {
 	let manifest = input.manifest;
-	const streamBridge = registerStreamBridge(manifest.runId);
+	// H4: registerStreamBridge inside try so dispose() in finally is safe
+	let streamBridge: ReturnType<typeof registerStreamBridge> | undefined;
 	try {
+	streamBridge = registerStreamBridge(manifest.runId);
 	const workspace = prepareTaskWorkspace(manifest, input.task);
 	const worktree = workspace.worktreePath && workspace.branch ? { path: workspace.worktreePath, branch: workspace.branch, reused: workspace.reused ?? false } : input.task.worktree;
 	const taskPacket = buildTaskPacket({ manifest, step: input.step, taskId: input.task.id, cwd: workspace.cwd, worktreePath: worktree?.path });
@@ -207,7 +209,7 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 					// Bridge event to UI event bus for near-instant updates
 					try {
 						const bridgeEvent = bridgeEventFromJsonEvent(manifest.runId, task.id, event);
-						if (bridgeEvent) streamBridge.handler(bridgeEvent);
+						if (bridgeEvent) streamBridge?.handler(bridgeEvent);
 					} catch { /* bridge errors should not affect task */ }
 					// Feed overflow recovery tracker
 					if (input.onJsonEvent) {
@@ -425,6 +427,6 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 	appendEvent(manifest.eventsPath, { type: error ? "task.failed" : "task.completed", runId: manifest.runId, taskId: task.id, message: error });
 	return { manifest, tasks };
 	} finally {
-		streamBridge.dispose();
+		streamBridge?.dispose();
 	}
 }

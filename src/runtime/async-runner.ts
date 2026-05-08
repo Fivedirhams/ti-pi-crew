@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { appendEvent } from "../state/event-log.ts";
 import type { TeamRunManifest } from "../state/types.ts";
 
+
 export type FileExists = (filePath: string) => boolean;
 
 const requireFromHere = createRequire(import.meta.url);
@@ -49,7 +50,7 @@ export function buildBackgroundSpawnOptions(manifest: TeamRunManifest, logFd: nu
 		cwd: manifest.cwd,
 		detached: true,
 		stdio: ["ignore", logFd, logFd],
-		env: { ...process.env },
+		env: { ...process.env, PI_CREW_PARENT_PID: String(process.pid) },
 		windowsHide: true,
 	};
 }
@@ -70,6 +71,7 @@ export function spawnBackgroundTeamRun(manifest: TeamRunManifest): SpawnBackgrou
 		fs.appendFileSync(logPath, `[pi-crew] background loader=${command.loader}\n`, "utf-8");
 		const child = spawn(process.execPath, command.args, buildBackgroundSpawnOptions(manifest, logFd));
 		child.unref();
+
 		return { pid: child.pid, logPath };
 	} finally {
 		fs.closeSync(logFd);
