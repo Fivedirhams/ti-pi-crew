@@ -48,8 +48,14 @@ export function buildMcpProxyConfig(options: {
 		return { enableMcp: true, proxyTools: [], proxyToolNames: [] };
 	}
 
-	// MCP tools exist in parent — create proxy tools and disable MCP in child
+	// MCP tools exist in parent — try to create proxy tools.
+	// If proxy tools are not available (stub), keep enableMcp: true
+	// so the child session can self-discover MCP instead of losing all access.
 	const proxyTools = createMcpProxyTools(parentTools);
+	if (proxyTools.length === 0) {
+		// No proxy tools available — let child discover MCP on its own
+		return { enableMcp: true, proxyTools: [], proxyToolNames: parentTools };
+	}
 	return {
 		enableMcp: false,
 		proxyTools,

@@ -104,12 +104,12 @@ export async function mapConcurrentWithSignal<T, R>(
 
 	try {
 		await Promise.race([Promise.all(workers), firstErrorPromise]);
-	} catch {
+	} catch (error) {
 		if (signal?.aborted) {
 			aborted = true;
 			return { results, aborted };
 		}
-		throw undefined;
+		throw error;
 	}
 
 	return { results, aborted: signal?.aborted ?? false };

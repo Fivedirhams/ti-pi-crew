@@ -45,10 +45,32 @@ export function isSensitivePath(filePath: string): boolean {
 		}
 	}
 
-	// Check name tokens (normalize separators: api-key → apikey, api_key → apikey)
+	// Check name tokens with word-boundary awareness to reduce false positives.
+	// Strategy: split filename on separators to get "words", then check if
+	// any token matches. For substring matching in the normalized form,
+	// we require the token to end at a segment boundary or string end.
+	// This matches 'secret', 'secrets' but NOT 'secretary'.
+	const words = lower.split(/[_\-\s.]+/).filter(Boolean);
 	const normalized = lower.replace(/[_\-\s.]/g, "");
 	for (const token of SENSITIVE_TOKENS) {
-		if (normalized.includes(token)) return true;
+		// Check individual words — exact match or token is prefix and word is <= token+2 chars
+		for (const word of words) {
+			if (word === token) return true;
+			// 'secrets' starts with 'secret' and is only 1 char longer → match
+			// 'secretary' starts with 'secret' but is 4 chars longer → no match
+			if (word.startsWith(token) && word.length <= token.length + 2) return true;
+		}
+		// Check fully-normalized form for compound tokens like 'api-key' → 'apikey'
+		// The token must appear as a complete segment (not a partial substring).
+		// After the token, the remaining chars must be a complete word (extension).
+		const idx = normalized.indexOf(token);
+		if (idx !== -1) {
+			const after = idx + token.length;
+			if (after === normalized.length) return true;
+			// Check if remaining chars after token correspond to a known word segment
+			const remaining = normalized.slice(after);
+			if (words.some((w) => remaining === w || remaining.startsWith(w))) return true;
+		}
 	}
 
 	return false;

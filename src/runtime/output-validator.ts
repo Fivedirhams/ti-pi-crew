@@ -19,7 +19,7 @@ const ROLE_PATTERNS: Record<string, RegExp> = {
 };
 
 /** Structural preservation checks for compressed prose */
-const URL_RE = /\bhttps?:\/\/\S+/gi;
+const URL_RE = /\bhttps?:\/\/[^\s<>)\]"',;]+/gi;
 const FENCED_CODE_RE = /```[\s\S]*?```/g;
 const INLINE_CODE_RE = /`[^`\n]+`/g;
 const HEADING_RE = /^#{1,6}\s+.+/gm;

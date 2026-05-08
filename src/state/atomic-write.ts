@@ -40,6 +40,13 @@ function isSymlinkSafePath(filePath: string): boolean {
 	}
 }
 
+/**
+ * Synchronous sleep using Atomics.wait (non-busy) with busy-wait fallback.
+ *
+ * WARNING: This blocks the Node.js main thread. Only used in atomic-write
+ * rename retry path where sync I/O is required by the caller.
+ * NOT safe to call from Pi extension async code paths.
+ */
 function sleepSync(ms: number): void {
 	try {
 		const buffer = new SharedArrayBuffer(4);

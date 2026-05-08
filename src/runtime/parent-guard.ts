@@ -6,9 +6,9 @@
  * (SIGKILL, crash, power loss, terminal close), the worker self-terminates
  * immediately — no sentinel process needed.
  *
- * On Windows, `process.kill(pid, 0)` does NOT work for detecting dead
- * parents. Instead we use `process.stderr?.write()` or `try {} catch {}`
- * with `execSync('tasklist')` as a fallback.
+ * Note: `process.kill(pid, 0)` works on both Unix and Windows in Node.js
+ * for checking process existence. On Windows, it may throw for processes
+ * owned by other users (permission error), but correctly detects dead PIDs.
  *
  * Usage in worker entry points:
  * ```ts

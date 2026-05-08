@@ -154,19 +154,28 @@ function executeSend(
 	const notFound: string[] = [];
 	const delivered: string[] = [];
 
-	if (to === "all") {
-		const recipients = broadcastIrcMessage(selfId, ircMessage);
-		delivered.push(...recipients);
-	} else {
-		// DM to specific agent
-		const agents = listLiveAgents();
-		const target = agents.find((a) => a.agentId === to);
-		if (!target || (target.status !== "running" && target.status !== "queued")) {
-			notFound.push(to);
+	try {
+		if (to === "all") {
+			const recipients = broadcastIrcMessage(selfId, ircMessage);
+			delivered.push(...recipients);
 		} else {
-			sendIrcMessage(to, ircMessage);
-			delivered.push(to);
+			// DM to specific agent
+			const agents = listLiveAgents();
+			const target = agents.find((a) => a.agentId === to);
+			if (!target || (target.status !== "running" && target.status !== "queued")) {
+				notFound.push(to);
+			} else {
+				try {
+					sendIrcMessage(to, ircMessage);
+					delivered.push(to);
+				} catch {
+					notFound.push(to);
+				}
+			}
 		}
+	} catch {
+		// Agent deregistered during routing — treat as not found
+		notFound.push(to);
 	}
 
 	const lines: string[] = [];

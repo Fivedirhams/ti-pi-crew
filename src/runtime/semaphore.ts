@@ -39,9 +39,10 @@ export class Semaphore {
 		const next = this.#queue.shift();
 		if (next) {
 			next();
-		} else {
+		} else if (this.#current > 0) {
 			this.#current--;
 		}
+		// Guard: over-release is a no-op to prevent #current going negative
 	}
 
 	/** Current number of acquired slots. */

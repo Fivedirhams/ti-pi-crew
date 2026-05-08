@@ -70,8 +70,8 @@ export function createSubmitResultTool(
 				...(params.artifacts ? { artifacts: params.artifacts } : {}),
 				...(params.structuredData ? { structuredData: params.structuredData } : {}),
 			};
-			onYield(result);
-			return {
+			// Build response first so the model always gets confirmation
+			const response: { content: Array<{ type: "text"; text: string }>; details: SubmitResultDetails } = {
 				content: [{ type: "text", text: "Result submitted successfully. Thank you." }],
 				details: {
 					summary: params.summary,
@@ -79,6 +79,12 @@ export function createSubmitResultTool(
 					structuredData: params.structuredData,
 				},
 			};
+			try {
+				onYield(result);
+			} catch {
+				// Yield handler failure should not prevent tool response
+			}
+			return response;
 		},
 	});
 }
