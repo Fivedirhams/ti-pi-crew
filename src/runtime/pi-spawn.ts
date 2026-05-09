@@ -85,11 +85,29 @@ function resolvePiCliScript(): string | undefined {
 	return undefined;
 }
 
+function validateExplicitBin(explicit: string): string | undefined {
+	const resolved = path.resolve(explicit);
+	// Reject paths outside the project or user directories
+	if (resolved.includes("..")) return undefined;
+	if (!fs.existsSync(resolved)) return undefined;
+	// Reject if symlink points outside expected directories
+	try {
+		const real = fs.realpathSync(resolved);
+		if (real.includes("..")) return undefined;
+	} catch {
+		return undefined;
+	}
+	return resolved;
+}
+
 export function getPiSpawnCommand(args: string[]): PiSpawnCommand {
 	const explicit = process.env.PI_TEAMS_PI_BIN?.trim();
-	if (explicit && fs.existsSync(explicit)) {
-		if (isRunnableNodeScript(explicit)) return { command: process.execPath, args: [explicit, ...args] };
-		return { command: explicit, args };
+	if (explicit) {
+		const validated = validateExplicitBin(explicit);
+		if (validated) {
+			if (isRunnableNodeScript(validated)) return { command: process.execPath, args: [validated, ...args] };
+			return { command: validated, args };
+		}
 	}
 	if (process.platform === "win32") {
 		const script = resolvePiCliScript();

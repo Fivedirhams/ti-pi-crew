@@ -83,6 +83,12 @@ function shouldMergeTaskUpdate(current: TeamTaskState, updated: TeamTaskState): 
 	// contain stale queued/running copies of tasks that another worker already
 	// completed. Never let those stale snapshots regress durable task state.
 	if (!isNonTerminalTaskStatus(current.status) && isNonTerminalTaskStatus(updated.status)) return false;
+	// Prevent a stale completed task from overwriting a fresher one.
+	if (current.finishedAt && updated.finishedAt) {
+		const currentFinished = new Date(current.finishedAt).getTime();
+		const updatedFinished = new Date(updated.finishedAt).getTime();
+		if (!Number.isNaN(currentFinished) && !Number.isNaN(updatedFinished) && updatedFinished < currentFinished) return false;
+	}
 	return updated.status !== current.status || updated.finishedAt !== current.finishedAt || updated.startedAt !== current.startedAt || Boolean(updated.resultArtifact) || Boolean(updated.error) || Boolean(updated.modelAttempts?.length) || Boolean(updated.usage) || Boolean(updated.attempts?.length);
 }
 

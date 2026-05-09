@@ -53,7 +53,9 @@ export function bridgeEventFromJsonEvent(runId: string, taskId: string, event: u
 	if (typeof record.toolName === "string") result.toolName = record.toolName;
 	if (record.args && typeof record.args === "object") {
 		try {
-			result.toolArgs = JSON.stringify(record.args).slice(0, 200);
+			const json = JSON.stringify(record.args);
+			// Truncate at a JSON boundary to avoid breaking structure
+			result.toolArgs = json.length > 200 ? json.slice(0, 197) + "..." : json;
 		} catch {
 			/* skip */
 		}

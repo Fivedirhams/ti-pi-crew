@@ -9,7 +9,7 @@ import { notifyActiveRuns } from "./session-summary.ts";
 import { LiveRunSidebar } from "../ui/live-run-sidebar.ts";
 import { registerPiCrewRpc, type PiCrewRpcHandle } from "./cross-extension-rpc.ts";
 import { stopCrewWidget, updateCrewWidget, type CrewWidgetState } from "../ui/crew-widget.ts";
-import { clearPiCrewPowerbar, disposePowerbarCoalescer, registerPiCrewPowerbarSegments, requestPowerbarUpdate, updatePiCrewPowerbar } from "../ui/powerbar-publisher.ts";
+import { clearPiCrewPowerbar, disposePowerbarCoalescer, registerPiCrewPowerbarSegments, requestPowerbarUpdate, resetPowerbarDedupState, updatePiCrewPowerbar } from "../ui/powerbar-publisher.ts";
 import { loadRunManifestById, updateRunStatus } from "../state/state-store.ts";
 import type { TeamRunManifest } from "../state/types.ts";
 import { terminateActiveChildPiProcesses } from "../subagents/spawn.ts";
@@ -344,7 +344,11 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 	time("register.policy");
 	registerAutonomousPolicy(pi);
 	time("register.rpc");
-	rpcHandle = registerPiCrewRpc((pi as unknown as { events?: Parameters<typeof registerPiCrewRpc>[0] }).events, () => currentCtx);
+	function getPiEvents(): Parameters<typeof registerPiCrewRpc>[0] | undefined {
+		if (pi && typeof pi === "object" && "events" in pi) return (pi as unknown as Record<string, unknown>).events as Parameters<typeof registerPiCrewRpc>[0];
+		return undefined;
+	}
+	rpcHandle = registerPiCrewRpc(getPiEvents(), () => currentCtx);
 
 	const cleanupRuntime = (): void => {
 		if (cleanedUp) return;
@@ -410,7 +414,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 		notifyActiveRuns(ctx);
 
 		// Auto-cancel orphaned runs from dead sessions
-		const currentSessionId = (ctx as unknown as Record<string, unknown>).sessionId as string | undefined;
+		const currentSessionId = (typeof ctx === "object" && ctx !== null && "sessionId" in ctx ? (ctx as Record<string, unknown>).sessionId : undefined) as string | undefined;
 		if (currentSessionId) {
 			try {
 				const { cancelled } = cancelOrphanedRuns(ctx.cwd, getManifestCache(ctx.cwd), currentSessionId);
@@ -437,7 +441,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 		configureNotifications(ctx);
 		configureObservability(ctx);
 		configureDeliveryCoordinator();
-		const sessionId = ctx.sessionManager?.getSessionId?.() ?? (ctx as unknown as Record<string, unknown>).sessionId;
+		const sessionId = ctx.sessionManager?.getSessionId?.() ?? (typeof ctx === "object" && ctx !== null && "sessionId" in ctx ? (ctx as Record<string, unknown>).sessionId : undefined);
 		if (typeof sessionId === "string" && sessionId) deliveryCoordinator?.activate(sessionId);
 		tryRegisterSessionCleanup(pi, () => { terminateActiveChildPiProcesses(); cleanupRuntime(); });
 		registerPiCrewPowerbarSegments(pi.events, loadedConfig.config.ui);
@@ -570,6 +574,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 			logInternalError("register.session-before-switch", `Switching session with ${pendingCount} pending deliveries`);
 		}
 		deliveryCoordinator?.deactivate();
+		resetPowerbarDedupState();
 		stopAsyncRunNotifier(notifierState);
 		stopSessionBoundSubagents();
 	});

@@ -42,7 +42,19 @@ export function registerPiCrewRpc(events: EventBusLike | undefined, getCtx: () =
 			try {
 				const ctx = getCtx();
 				if (!ctx) throw new Error("No active pi-crew session context.");
-				const params: TeamToolParamsValue = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as object), action: "run" } as TeamToolParamsValue : { action: "run" };
+				// Validate payload: only allow known fields from TeamToolParamsValue
+				const ALLOWED_RPC_RUN_KEYS = new Set(["goal", "team", "workflow", "async", "cwd", "config", "skill", "model"]);
+				let params: TeamToolParamsValue;
+				if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+					const filtered: Record<string, unknown> = { ...(raw as object) };
+					// Strip any keys not in the allowlist to prevent injection of unexpected fields
+					for (const key of Object.keys(filtered)) {
+						if (!ALLOWED_RPC_RUN_KEYS.has(key)) delete filtered[key];
+					}
+					params = { ...filtered, action: "run" } as TeamToolParamsValue;
+				} else {
+					params = { action: "run" };
+				}
 				const result = await handleTeamTool(params, ctx);
 				reply(events, "pi-crew:rpc:run", id, result.isError ? { success: false, error: textOf(result) } : { success: true, data: result.details });
 			} catch (error) {

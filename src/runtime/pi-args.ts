@@ -83,14 +83,23 @@ export function buildPiWorkerArgs(input: BuildPiWorkerArgsInput): BuildPiWorkerA
 
 	let tempDir: string | undefined;
 	if (input.agent.systemPrompt) {
-		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-"));
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-crew-${process.pid}-`));
+		// Verify temp dir is not a symlink (TOCTOU safety)
+		try {
+			const stat = fs.lstatSync(tempDir);
+			if (stat.isSymbolicLink()) throw new Error("temp dir is a symlink");
+		} catch {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+			tempDir = undefined;
+			throw new Error("Refusing to use symlinked temp directory.");
+		}
 		const promptPath = path.join(tempDir, `${input.agent.name.replace(/[^\w.-]/g, "_")}.md`);
 		fs.writeFileSync(promptPath, input.agent.systemPrompt, { mode: 0o600 });
 		args.push(input.agent.systemPromptMode === "append" ? "--append-system-prompt" : "--system-prompt", promptPath);
 	}
 
 	if (input.task.length > TASK_ARG_LIMIT) {
-		if (!tempDir) tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-"));
+		if (!tempDir) tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-crew-${process.pid}-`));
 		const taskPath = path.join(tempDir, "task.md");
 		fs.writeFileSync(taskPath, input.task, { mode: 0o600 });
 		args.push(`@${taskPath}`);

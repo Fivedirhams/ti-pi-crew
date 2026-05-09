@@ -50,7 +50,7 @@ export function isSensitivePath(filePath: string): boolean {
 	// any token matches. For substring matching in the normalized form,
 	// we require the token to end at a segment boundary or string end.
 	// This matches 'secret', 'secrets' but NOT 'secretary'.
-	const words = lower.split(/[_\-\s.]+/).filter(Boolean);
+	const words = lower.split(/[_\-\s.\W]+/).filter(Boolean);
 	const normalized = lower.replace(/[_\-\s.]/g, "");
 	for (const token of SENSITIVE_TOKENS) {
 		// Check individual words — exact match or token is prefix and word is <= token+2 chars

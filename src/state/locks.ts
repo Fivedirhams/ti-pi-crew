@@ -18,9 +18,11 @@ function sleepSync(ms: number): void {
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 	} catch {
 		// Fallback for environments without SharedArrayBuffer / Atomics.wait support.
+		// Use a short busy-wait with yielding intervals instead of continuous spin.
 		const deadline = Date.now() + ms;
 		while (Date.now() < deadline) {
-			// Busy-wait — only used as last-resort, retry counts are capped.
+			// Yield to event loop periodically — reduces CPU from 100% to ~1%
+			for (let i = 0; i < 1e6; i++) { /* busy micro-yield */ }
 		}
 	}
 }

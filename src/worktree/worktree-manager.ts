@@ -77,9 +77,17 @@ function runSetupHook(manifest: TeamRunManifest, task: TeamTaskState, repoRoot: 
 	if (result.status !== 0) throw new Error(`worktree setup hook failed with exit code ${result.status}: ${result.stderr || result.stdout || "no output"}`);
 	const trimmed = result.stdout.trim();
 	if (!trimmed) return [];
-	const parsed = JSON.parse(trimmed) as { syntheticPaths?: unknown };
-	if (!Array.isArray(parsed.syntheticPaths)) return [];
-	return [...new Set(parsed.syntheticPaths.filter((entry): entry is string => typeof entry === "string").map((entry) => normalizeSyntheticPath(worktreePath, entry)))];
+	try {
+		// Extract JSON from last line — hooks may output debug logging before JSON
+		const lines = trimmed.split(/\r?\n/);
+		const lastLine = lines[lines.length - 1] ?? trimmed;
+		const parsed = JSON.parse(lastLine) as { syntheticPaths?: unknown };
+		if (!Array.isArray(parsed.syntheticPaths)) return [];
+		return [...new Set(parsed.syntheticPaths.filter((entry): entry is string => typeof entry === "string").map((entry) => normalizeSyntheticPath(worktreePath, entry)))];
+	} catch {
+		// Hook output was not valid JSON — treat as no synthetic paths
+		return [];
+	}
 }
 
 export function prepareTaskWorkspace(manifest: TeamRunManifest, task: TeamTaskState): PreparedTaskWorkspace {

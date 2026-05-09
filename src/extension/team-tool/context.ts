@@ -19,7 +19,7 @@ export type TeamContext = Pick<ExtensionContext, "cwd"> & Partial<Pick<Extension
 };
 
 export function withSessionId<T extends Pick<ExtensionContext, "sessionManager">>(ctx: T): T & { sessionId?: string } {
-	const sessionId = ctx.sessionManager.getSessionId();
+	const sessionId = ctx.sessionManager?.getSessionId?.();
 	return sessionId ? { ...ctx, sessionId } : { ...ctx };
 }
 

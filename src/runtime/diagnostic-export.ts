@@ -26,12 +26,14 @@ export interface DiagnosticReport {
 }
 
 const SECRET_KEY_PATTERN = /(token|key|password|secret|credential|auth)/i;
+const ENV_DEBUG_ALLOWLIST = /^(PI_CREW_|PI_TEAMS_|PI_.*HOME|NODE_ENV|NODE_VERSION|OS|PROCESSOR|TERM|LANG|HOME|USERPROFILE|APPDATA|PLATFORM|ARCH|WIN32|DOCKER|CI|VERBOSE|DEBUG|NO_COLOR|FORCE_COLOR|NPM_CONFIG|npm_)/i;
 
 function envRedacted(): Record<string, string> {
 	const output: Record<string, string> = {};
 	for (const [key, value] of Object.entries(process.env)) {
 		if (SECRET_KEY_PATTERN.test(key)) output[key] = "***";
-		else if (typeof value === "string") output[key] = value;
+		else if (typeof value === "string" && ENV_DEBUG_ALLOWLIST.test(key)) output[key] = value;
+		// All other env vars are omitted to prevent leaking sensitive paths or system topology.
 	}
 	return output;
 }

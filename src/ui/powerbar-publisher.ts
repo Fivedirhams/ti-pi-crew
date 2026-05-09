@@ -189,3 +189,9 @@ export function clearPiCrewPowerbar(events: EventBus, ctx?: StatusContext): void
 	safeEmit(events, "powerbar:update", { id: "pi-crew-progress" });
 	setStatusFallback(ctx, undefined);
 }
+
+/** Reset dedup state on session lifecycle events. */
+export function resetPowerbarDedupState(): void {
+	lastEmittedActive = undefined;
+	lastEmittedProgress = undefined;
+}
