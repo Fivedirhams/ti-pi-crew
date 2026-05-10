@@ -231,3 +231,35 @@ test("resourcesToExportContent converts skill descriptor", () => {
 	assert.equal(contents[0]!.id, "git-master");
 	assert.equal(contents[0]!.source.type, "skill");
 });
+
+// ── Multi-resource Codex export (CRITICAL-2 fix) ──────────────────
+
+test("generateToolExport merges duplicate file paths for codex adapter", () => {
+	const result = generateToolExport("codex", [
+		{
+			kind: "agent",
+			config: {
+				name: "Explorer",
+				description: "Explores codebases",
+				source: "builtin",
+				filePath: "/agents/explorer.md",
+				systemPrompt: "Explore everything.",
+			},
+		},
+		{
+			kind: "agent",
+			config: {
+				name: "Reviewer",
+				description: "Reviews code",
+				source: "builtin",
+				filePath: "/agents/reviewer.md",
+				systemPrompt: "Review code carefully.",
+			},
+		},
+	]);
+	// Codex maps everything to AGENTS.md, so duplicate paths must be merged
+	assert.equal(result.files.length, 1);
+	assert.equal(result.files[0]!.path, "AGENTS.md");
+	assert.match(result.files[0]!.content, /## Explorer/);
+	assert.match(result.files[0]!.content, /## Reviewer/);
+});

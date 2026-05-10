@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { logInternalError } from "../utils/internal-error.ts";
+import { sleepSync } from "../utils/sleep.ts";
 
 const RETRYABLE_RENAME_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
 
@@ -40,25 +41,7 @@ function isSymlinkSafePath(filePath: string): boolean {
 	}
 }
 
-/**
- * Synchronous sleep using Atomics.wait (non-busy) with busy-wait fallback.
- *
- * WARNING: This blocks the Node.js main thread. Only used in atomic-write
- * rename retry path where sync I/O is required by the caller.
- * NOT safe to call from Pi extension async code paths.
- */
-function sleepSync(ms: number): void {
-	try {
-		const buffer = new SharedArrayBuffer(4);
-		Atomics.wait(new Int32Array(buffer), 0, 0, ms);
-	} catch {
-		// Fallback for environments without SharedArrayBuffer / Atomics.wait support.
-		const deadline = Date.now() + ms;
-		while (Date.now() < deadline) {
-			// Busy-wait — only used as last-resort, retry counts are capped.
-		}
-	}
-}
+
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -125,7 +108,10 @@ export async function atomicWriteFileAsync(filePath: string, content: string): P
 	await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
 	const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
 	try {
-		await fs.promises.writeFile(tempPath, content, "utf-8");
+		const O_NOFOLLOW = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+		const fd = await fs.promises.open(tempPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, 0o644);
+		await fd.writeFile(content, "utf-8");
+		await fd.close();
 		try {
 			await __test__renameWithRetryAsync(tempPath, filePath);
 		} catch (renameError) {

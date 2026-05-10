@@ -8,7 +8,7 @@ import { getPiSpawnCommand } from "./pi-spawn.ts";
 import { DEFAULT_CHILD_PI } from "../config/defaults.ts";
 import { logInternalError } from "../utils/internal-error.ts";
 import { attachPostExitStdioGuard, trySignalChild } from "./post-exit-stdio-guard.ts";
-import { redactJsonLine } from "../utils/redaction.ts";
+import { redactJsonLine, SECRET_KEY_PATTERN } from "../utils/redaction.ts";
 
 const POST_EXIT_STDIO_GUARD_MS = DEFAULT_CHILD_PI.postExitStdioGuardMs;
 const FINAL_DRAIN_MS = DEFAULT_CHILD_PI.finalDrainMs;
@@ -110,9 +110,14 @@ export interface ChildPiRunResult {
 }
 
 export function buildChildPiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): SpawnOptions {
+	// Filter out env vars whose keys match secret patterns to avoid leaking credentials to child processes
+	const filteredEnv: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (value !== undefined && !SECRET_KEY_PATTERN.test(key)) filteredEnv[key] = value;
+	}
 	return {
 		cwd,
-		env: { ...env, PI_CREW_PARENT_PID: String(process.pid) },
+		env: { ...filteredEnv, PI_CREW_PARENT_PID: String(process.pid) },
 		stdio: ["ignore", "pipe", "pipe"],
 		detached: process.platform !== "win32",
 		windowsHide: true,

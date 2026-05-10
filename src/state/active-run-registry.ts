@@ -6,6 +6,7 @@ import { atomicWriteJson } from "./atomic-write.ts";
 import { userCrewRoot } from "../utils/paths.ts";
 import { isSafePathId } from "../utils/safe-paths.ts";
 import { sharedScanCache } from "../utils/scan-cache.ts";
+import { sleepSync } from "../utils/sleep.ts";
 
 export interface ActiveRunRegistryEntry {
 	runId: string;
@@ -23,16 +24,7 @@ function registryLockPath(): string {
 	return `${registryPath()}.lock`;
 }
 
-function sleepSync(ms: number): void {
-	try {
-		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-	} catch {
-		const deadline = Date.now() + ms;
-		while (Date.now() < deadline) {
-			// Best-effort fallback for rare runtimes without Atomics.wait.
-		}
-	}
-}
+
 
 function lockCreatedAt(raw: string): number | undefined {
 	try {

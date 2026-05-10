@@ -84,9 +84,11 @@ export function pruneUserLevelRuns(keep: number): PruneRunsResult {
 	if (!fs.existsSync(runsRoot)) return { kept: [], removed: [] };
 
 	// Read all run directories, parse manifests, filter to finished
+	const MAX_DIRS = 500;
 	const finished: Array<{ runId: string; updatedAt: string; stateRoot: string; artifactsRoot: string }> = [];
 	const dirs = fs.readdirSync(runsRoot, { withFileTypes: true })
 		.filter((entry) => entry.isDirectory() && isSafePathId(entry.name))
+		.slice(0, MAX_DIRS)
 		.map((entry) => entry.name);
 
 	for (const dir of dirs) {

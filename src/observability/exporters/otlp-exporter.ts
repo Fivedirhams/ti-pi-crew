@@ -1,4 +1,5 @@
 import { logInternalError } from "../../utils/internal-error.ts";
+import { redactSecrets } from "../../utils/redaction.ts";
 import type { MetricRegistry } from "../metric-registry.ts";
 import type { MetricSnapshot } from "../metrics-primitives.ts";
 import type { MetricExporter } from "./adapter.ts";
@@ -11,16 +12,30 @@ export interface OTLPExporterOptions {
 }
 
 function pointValues(snapshot: MetricSnapshot): unknown[] {
+	const MAX_LABEL_LENGTH = 256;
 	if (snapshot.type === "histogram") {
 		return snapshot.values.map((value) => ({
-			attributes: Object.entries(value.labels).map(([key, item]) => ({ key, value: { stringValue: String(item) } })),
+			attributes: Object.entries(value.labels).map(([key, item]) => {
+				const redacted = redactSecrets({ [key]: item }) as Record<string, string>;
+				const val = String(redacted[key] ?? item);
+				return { key, value: { stringValue: val.length > MAX_LABEL_LENGTH ? val.slice(0, MAX_LABEL_LENGTH) : val } };
+			}),
 			count: "count" in value ? value.count : undefined,
 			sum: "sum" in value ? value.sum : undefined,
 			bucketCounts: "counts" in value ? value.counts : undefined,
 			explicitBounds: "buckets" in value ? value.buckets : undefined,
 		}));
 	}
-	return snapshot.values.map((value) => ({ attributes: Object.entries(value.labels).map(([key, item]) => ({ key, value: { stringValue: String(item) } })), asDouble: "value" in value ? value.value : undefined, count: "count" in value ? value.count : undefined, sum: "sum" in value ? value.sum : undefined }));
+	return snapshot.values.map((value) => ({
+		attributes: Object.entries(value.labels).map(([key, item]) => {
+			const redacted = redactSecrets({ [key]: item }) as Record<string, string>;
+			const val = String(redacted[key] ?? item);
+			return { key, value: { stringValue: val.length > MAX_LABEL_LENGTH ? val.slice(0, MAX_LABEL_LENGTH) : val } };
+		}),
+		asDouble: "value" in value ? value.value : undefined,
+		count: "count" in value ? value.count : undefined,
+		sum: "sum" in value ? value.sum : undefined,
+	}));
 }
 
 export function convertToOTLP(snapshots: MetricSnapshot[]): unknown {

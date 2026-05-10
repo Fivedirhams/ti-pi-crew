@@ -65,7 +65,12 @@ export function checkCrewDepth(inputMaxDepth?: number, env: NodeJS.ProcessEnv = 
  */
 function createSafeTempDir(base: string, prefix: string): string {
 	if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true });
-	const rawTempDir = fs.mkdtempSync(path.join(base, prefix));
+	// Verify base dir is not a symlink (TOCTOU safety)
+	const baseStat = fs.lstatSync(base);
+	if (baseStat.isSymbolicLink()) throw new Error("Refusing to create temp dir in symlinked base: " + base);
+	// Resolve base to canonical path before joining
+	const resolvedBase = fs.realpathSync(base);
+	const rawTempDir = fs.mkdtempSync(path.join(resolvedBase, prefix));
 	try {
 		const stat = fs.lstatSync(rawTempDir);
 		if (stat.isSymbolicLink()) throw new Error("temp dir is a symlink");

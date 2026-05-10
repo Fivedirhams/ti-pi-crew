@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TeamRunManifest } from "./types.ts";
 import { DEFAULT_LOCKS } from "../config/defaults.ts";
+import { sleepSync } from "../utils/sleep.ts";
 
 export interface RunLockOptions {
 	staleMs?: number;
@@ -13,19 +14,7 @@ function lockPath(manifest: TeamRunManifest): string {
 	return path.join(manifest.stateRoot, "run.lock");
 }
 
-function sleepSync(ms: number): void {
-	try {
-		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-	} catch {
-		// Fallback for environments without SharedArrayBuffer / Atomics.wait support.
-		// Use a short busy-wait with yielding intervals instead of continuous spin.
-		const deadline = Date.now() + ms;
-		while (Date.now() < deadline) {
-			// Yield to event loop periodically — reduces CPU from 100% to ~1%
-			for (let i = 0; i < 1e6; i++) { /* busy micro-yield */ }
-		}
-	}
-}
+
 
 function parseCreatedAtFromLock(raw: string): number | undefined {
 	try {

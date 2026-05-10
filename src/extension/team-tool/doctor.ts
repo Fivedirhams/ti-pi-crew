@@ -117,6 +117,15 @@ export interface TeamDoctorReport {
 }
 
 export function buildTeamDoctorReport(input: TeamDoctorReportInput): TeamDoctorReport {
+	// Compute drift once — reused in both Drift section and return value
+	const driftResult = detectDrift(
+		{
+			agents: allAgents(discoverAgents(input.cwd)).map((a) => a.name),
+			teams: allTeams(discoverTeams(input.cwd)).map((t) => t.name),
+			workflows: allWorkflows(discoverWorkflows(input.cwd)).map((w) => w.name),
+		},
+		loadConfig(input.cwd).config,
+	);
 	const sections = [
 		section("Runtime", () => {
 			const git = commandExists("git", ["--version"]);
@@ -159,20 +168,12 @@ export function buildTeamDoctorReport(input: TeamDoctorReportInput): TeamDoctorR
 			detail: `${input.validationErrors} errors, ${input.validationWarnings} warnings`,
 		}]),
 		section("Drift", () => {
-			const drift = detectDrift(
-				{
-					agents: allAgents(discoverAgents(input.cwd)).map((a) => a.name),
-					teams: allTeams(discoverTeams(input.cwd)).map((t) => t.name),
-					workflows: allWorkflows(discoverWorkflows(input.cwd)).map((w) => w.name),
-				},
-				loadConfig(input.cwd).config,
-			);
-			const driftErrors = drift.items.filter((item) => item.severity === "error").length;
-			const driftWarnings = drift.items.filter((item) => item.severity === "warning").length;
+			const driftErrors = driftResult.items.filter((item) => item.severity === "error").length;
+			const driftWarnings = driftResult.items.filter((item) => item.severity === "warning").length;
 			return [{
 				label: "config drift",
-				ok: !drift.hasDrift || driftErrors === 0,
-				detail: drift.hasDrift ? `${driftErrors} errors, ${driftWarnings} warnings` : "no drift detected",
+				ok: !driftResult.hasDrift || driftErrors === 0,
+				detail: driftResult.hasDrift ? `${driftErrors} errors, ${driftWarnings} warnings` : "no drift detected",
 			}];
 		}),
 		section("Schema", () => {
@@ -200,14 +201,6 @@ export function buildTeamDoctorReport(input: TeamDoctorReportInput): TeamDoctorR
 	}
 	if (lines.at(-1) === "") lines.pop();
 	const text = lines.join("\n");
-	const driftResult = detectDrift(
-		{
-			agents: allAgents(discoverAgents(input.cwd)).map((a) => a.name),
-			teams: allTeams(discoverTeams(input.cwd)).map((t) => t.name),
-			workflows: allWorkflows(discoverWorkflows(input.cwd)).map((w) => w.name),
-		},
-		loadConfig(input.cwd).config,
-	);
 	return { text, hasErrors: sections.some((sectionLines) => sectionLines.some((line) => line.includes("FAIL"))), drift: driftResult.hasDrift ? driftResult : undefined };
 }
 

@@ -166,7 +166,13 @@ export function __test__parseAdaptivePlan(text: string, allowedRoles: string[]):
 	return phases.length ? { phases } : undefined;
 }
 
-function closeUnbalancedJson(raw: string): string {
+interface CloseUnbalancedJsonResult {
+	text: string;
+	status: "repaired" | "unstable";
+	warning?: string;
+}
+
+function closeUnbalancedJson(raw: string): CloseUnbalancedJsonResult {
 	let result = raw.trim();
 	const stack: string[] = [];
 	let inString = false;
@@ -190,7 +196,11 @@ function closeUnbalancedJson(raw: string): string {
 		else if ((char === "}" || char === "]") && stack.at(-1) === char) stack.pop();
 	}
 	while (stack.length) result += stack.pop();
-	return result;
+	// If still in a string, the JSON string was truncated — values may be semantically different
+	if (inString) {
+		return { text: result, status: "unstable", warning: "JSON string was truncated — values may be incorrect" };
+	}
+	return { text: result, status: "repaired" };
 }
 
 function salvageCompletePhaseObjects(raw: string): unknown | undefined {
@@ -257,7 +267,8 @@ function adaptiveRoleAlias(role: string, allowed: Set<string>): string | undefin
 export function __test__repairAdaptivePlan(text: string, allowedRoles: string[]): { plan?: AdaptivePlan; repaired: boolean; reason?: string } {
 	const raw = extractAdaptivePlanJson(text);
 	if (!raw) return { repaired: false, reason: "missing-json" };
-	const candidates = [raw, closeUnbalancedJson(raw)];
+	const closeResult = closeUnbalancedJson(raw);
+	const candidates = [raw, closeResult.text];
 	let parsed: unknown;
 	let salvageUsed = false;
 	for (const candidate of candidates) {
@@ -278,7 +289,7 @@ export function __test__repairAdaptivePlan(text: string, allowedRoles: string[])
 	const allowed = new Set(allowedRoles);
 	const phases: AdaptivePlanPhase[] = [];
 	let total = 0;
-	let repaired = salvageUsed || raw !== closeUnbalancedJson(raw);
+	let repaired = salvageUsed || raw !== closeResult.text;
 	for (const [phaseIndex, phaseRaw] of phasesRaw.entries()) {
 		if (!phaseRaw || typeof phaseRaw !== "object" || Array.isArray(phaseRaw)) continue;
 		const phaseObj = phaseRaw as { name?: unknown; tasks?: unknown };

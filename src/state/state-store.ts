@@ -199,7 +199,14 @@ export async function saveRunTasksAsync(manifest: TeamRunManifest, tasks: TeamTa
 	invalidateRunCache(manifest.stateRoot);
 }
 
-/** M8: Atomically save manifest + tasks and invalidate cache once to prevent stale reads between saves */
+/**
+ * Save manifest and tasks files with individual atomic writes.
+ *
+ * Note: The two writes are individually atomic (via rename) but not
+ * jointly atomic — a crash between writes can leave them inconsistent.
+ * This is acceptable because crash recovery detects and repairs
+ * inconsistent state on next session start.
+ */
 export async function saveManifestAndTasksAtomic(manifest: TeamRunManifest, tasks: TeamTaskState[]): Promise<void> {
 	await Promise.all([
 		atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest),

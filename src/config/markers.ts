@@ -37,9 +37,19 @@ const VALID_BLOCK_ID = /^[a-zA-Z0-9_-]+$/;
  * be used for prompt injection. This is a best-effort defense — content
  * should still come from trusted sources.
  */
+/**
+ * Best-effort content sanitizer for guidance blocks.
+ *
+ * WARNING: This is NOT a security boundary. Content should come from trusted
+ * sources only. This sanitizer handles common injection patterns but cannot
+ * prevent all bypasses (e.g., base64, ROT13, semantic tricks).
+ */
 export function sanitizeGuidanceContent(content: string): string {
+  let sanitized = content;
+  // Strip zero-width and invisible Unicode characters (potential bypass vectors)
+  sanitized = sanitized.replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFEFF]/g, "");
   // Strip HTML comments (potential instruction hiding)
-  let sanitized = content.replace(/<!--[\s\S]*?-->/g, "");
+  sanitized = sanitized.replace(/<!--[\s\S]*?-->/g, "");
   // Strip lines that look like system directives (e.g. "SYSTEM:", "INSTRUCTION:", "IGNORE PREVIOUS")
   sanitized = sanitized.replace(/^\s*(?:SYSTEM|INSTRUCTION|IGNORE\s+PREVIOUS|OVERRIDE)\s*:.*$/gim, "");
   // Collapse multiple blank lines left by removals

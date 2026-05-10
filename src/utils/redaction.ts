@@ -1,4 +1,4 @@
-const SECRET_KEY_PATTERN = /(?:^|[_.-])(token|api[-_]?key|password|passwd|secret|credential|authorization|private[-_]?key)(?:$|[_.-])/i;
+export const SECRET_KEY_PATTERN = /(?:^|[_.-])(token|api[-_]?key|password|passwd|secret|credential|authorization|private[-_]?key)(?:$|[_.-])/i;
 const INLINE_SECRET_PATTERN = /(^|[\s,{])(([A-Za-z0-9_.-]*(?:api[-_]?key|token|password|passwd|secret|credential|authorization|private[-_]?key)[A-Za-z0-9_.-]*)\s*[=:]\s*)([^\s,;"'}]+)/gi;
 const AUTH_HEADER_PATTERN = /\b(Authorization\s*:\s*(?:Bearer|Basic|Token)?\s*)([^\r\n]+)/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)([A-Za-z0-9._~+/=-]{8,})\b/g;

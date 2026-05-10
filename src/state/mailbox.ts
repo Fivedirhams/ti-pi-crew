@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { TeamRunManifest } from "./types.ts";
 import { resolveRealContainedPath } from "../utils/safe-paths.ts";
 import { redactSecrets } from "../utils/redaction.ts";
+import { atomicWriteFile } from "./atomic-write.ts";
 
 export type MailboxDirection = "inbox" | "outbox";
 export type MailboxMessageStatus = "queued" | "delivered" | "acknowledged";
@@ -232,7 +233,7 @@ export function readDeliveryState(manifest: TeamRunManifest): MailboxDeliverySta
 
 function writeDeliveryState(manifest: TeamRunManifest, state: MailboxDeliveryState): void {
 	ensureRunMailbox(manifest);
-	fs.writeFileSync(deliveryFile(manifest, true), `${JSON.stringify(redactSecrets(state), null, 2)}\n`, "utf-8");
+	atomicWriteFile(deliveryFile(manifest, true), `${JSON.stringify(redactSecrets(state), null, 2)}\n`);
 }
 
 export function appendMailboxMessage(manifest: TeamRunManifest, message: Omit<MailboxMessage, "id" | "runId" | "createdAt" | "status"> & { id?: string; status?: MailboxMessageStatus }): MailboxMessage {
@@ -342,7 +343,7 @@ export function updateMailboxMessageReply(manifest: TeamRunManifest, originalMes
 			}
 		}
 		if (found) {
-			fs.writeFileSync(filePath, `${updatedLines.join("\n")}\n`, "utf-8");
+			atomicWriteFile(filePath, `${updatedLines.join("\n")}\n`);
 			return;
 		}
 	}
@@ -384,7 +385,7 @@ export function validateMailbox(manifest: TeamRunManifest, options: { repair?: b
 			}
 		}
 		if (options.repair && validLines.length !== lines.length) {
-			fs.writeFileSync(filePath, `${validLines.join("\n")}${validLines.length ? "\n" : ""}`, "utf-8");
+			atomicWriteFile(filePath, `${validLines.join("\n")}${validLines.length ? "\n" : ""}`);
 			repaired.push(filePath);
 		}
 	}

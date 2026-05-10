@@ -126,5 +126,12 @@ export function generateToolExport(
 			content: adapter.formatFile(content),
 		};
 	});
-	return { toolId, files };
+	// Merge duplicate file paths (e.g., codex adapter maps everything to AGENTS.md)
+	const merged = new Map<string, string>();
+	for (const f of files) {
+		const existing = merged.get(f.path);
+		merged.set(f.path, existing ? `${existing}\n\n${f.content}` : f.content);
+	}
+	const mergedFiles = [...merged.entries()].map(([p, content]) => ({ path: p, content }));
+	return { toolId, files: mergedFiles };
 }
