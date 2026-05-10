@@ -125,6 +125,8 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "blocked"
  */
 function filterAliveEntries(entries: ActiveRunRegistryEntry[]): ActiveRunRegistryEntry[] {
 	return entries.filter((entry) => {
+		// Entry whose CWD directory is gone (e.g., temp test dir cleaned up) is stale
+		if (!fs.existsSync(entry.cwd)) return false;
 		// Entry whose state directory is gone is definitely stale
 		if (!fs.existsSync(entry.manifestPath)) return false;
 		try {
@@ -165,6 +167,8 @@ export function activeRunEntries(): ActiveRunRegistryEntry[] {
 	const entries: ActiveRunRegistryEntry[] = [];
 	for (const entry of readActiveRunRegistry()) {
 		try {
+			// Skip entries whose CWD no longer exists (temp test dirs, deleted projects)
+			if (!fs.existsSync(entry.cwd)) continue;
 			if (!fs.existsSync(entry.stateRoot) || !fs.existsSync(entry.manifestPath)) continue;
 			if (fs.lstatSync(entry.stateRoot).isSymbolicLink()) continue;
 			const cached = sharedScanCache.readAndCache("active-manifests", entry.runId, entry.manifestPath);
