@@ -8,7 +8,7 @@ import { DEFAULT_CACHE, DEFAULT_PATHS } from "../config/defaults.ts";
 import { createRunId, createTaskId } from "../utils/ids.ts";
 import { findRepoRoot, projectCrewRoot, userCrewRoot } from "../utils/paths.ts";
 import { assertSafePathId, resolveContainedRelativePath, resolveRealContainedPath } from "../utils/safe-paths.ts";
-import { withRunLockSync, withRunLock } from "./locks.ts";
+import { withRunLock } from "./locks.ts";
 import type { TeamConfig } from "../teams/team-config.ts";
 import type { WorkflowConfig } from "../workflows/workflow-config.ts";
 
@@ -181,31 +181,23 @@ export function createRunManifest(params: {
 }
 
 export function saveRunManifest(manifest: TeamRunManifest): void {
-	withRunLockSync(manifest, () => {
-		atomicWriteJson(path.join(manifest.stateRoot, "manifest.json"), manifest);
-		invalidateRunCache(manifest.stateRoot);
-	});
+	atomicWriteJson(path.join(manifest.stateRoot, "manifest.json"), manifest);
+	invalidateRunCache(manifest.stateRoot);
 }
 
 export async function saveRunManifestAsync(manifest: TeamRunManifest): Promise<void> {
-	await withRunLock(manifest, async () => {
-		await atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest);
-		invalidateRunCache(manifest.stateRoot);
-	});
+	await atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest);
+	invalidateRunCache(manifest.stateRoot);
 }
 
 export function saveRunTasks(manifest: TeamRunManifest, tasks: TeamTaskState[]): void {
-	withRunLockSync(manifest, () => {
-		atomicWriteJson(manifest.tasksPath, tasks);
-		invalidateRunCache(manifest.stateRoot);
-	});
+	atomicWriteJson(manifest.tasksPath, tasks);
+	invalidateRunCache(manifest.stateRoot);
 }
 
 export async function saveRunTasksAsync(manifest: TeamRunManifest, tasks: TeamTaskState[]): Promise<void> {
-	await withRunLock(manifest, async () => {
-		await atomicWriteJsonAsync(manifest.tasksPath, tasks);
-		invalidateRunCache(manifest.stateRoot);
-	});
+	await atomicWriteJsonAsync(manifest.tasksPath, tasks);
+	invalidateRunCache(manifest.stateRoot);
 }
 
 /**

@@ -27,7 +27,8 @@ test("package snapshot keeps Phase 6 runtime docs, skills, and jiti loader depen
 	for (const relativePath of [
 		"docs/architecture.md",
 		"docs/runtime-flow.md",
-		"docs/refactor-tasks-phase6.md",
+		"docs/commands-reference.md",
+		"docs/actions-reference.md",
 		"skills/safe-bash/SKILL.md",
 		"skills/verify-evidence/SKILL.md",
 		"skills/git-master/SKILL.md",

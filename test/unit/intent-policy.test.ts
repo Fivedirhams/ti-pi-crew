@@ -55,9 +55,9 @@ test("cancel proceeds when required intent is supplied", async () => {
 test("cleanup requires intent only when force is set", async () => {
 	const run = createRun();
 	try {
-		const normal = await handleCleanup({ action: "cleanup", runId: run.runId }, { cwd: run.cwd, config: parseConfig(policy) });
+		const normal = await handleCleanup({ action: "cleanup", runId: run.runId }, { cwd: run.cwd, sessionId: "session-a", config: parseConfig(policy) });
 		assert.equal(normal.isError, false);
-		const forced = await handleCleanup({ action: "cleanup", runId: run.runId, force: true }, { cwd: run.cwd, config: parseConfig(policy) });
+		const forced = await handleCleanup({ action: "cleanup", runId: run.runId, force: true }, { cwd: run.cwd, sessionId: "session-a", config: parseConfig(policy) });
 		assert.equal(forced.isError, true);
 		assert.match(textFromToolResult(forced), /requires config\.intent/);
 	} finally {
