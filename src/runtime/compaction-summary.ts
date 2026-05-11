@@ -43,6 +43,7 @@ export function summaryPathsFor(stateRoot: string): SummaryPaths {
  * For files larger than TAIL_MAX_READ bytes, only the last chunk is read.
  */
 const TAIL_MAX_READ = 256 * 1024; // 256KB — enough for ~1000 lines of JSONL
+const MAX_FALLBACK_READ = 2 * 1024 * 1024; // 2MB — safety limit for giant-line fallback
 function readTailLines(filePath: string, maxLines: number): string[] {
 	if (!fs.existsSync(filePath)) return [];
 	try {
@@ -91,6 +92,8 @@ function readTailLines(filePath: string, maxLines: number): string[] {
 	} catch (err) {
 		// Giant-line fallback: fd already closed by finally above.
 		if (err instanceof Error && err.message === "__GIANT_LINE_FALLBACK__") {
+			const stat = fs.statSync(filePath);
+			if (stat.size > MAX_FALLBACK_READ) return [];
 			const content = fs.readFileSync(filePath, "utf-8");
 			return content.split("\n").filter((line) => line.trim().length > 0).slice(-maxLines);
 		}

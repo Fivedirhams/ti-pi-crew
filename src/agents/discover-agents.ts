@@ -58,7 +58,7 @@ function parseAgentFile(filePath: string, source: ResourceSource): AgentConfig |
 		loadMode: parseLoadMode(frontmatter.loadMode),
 		defaultTools: frontmatter.defaultTools !== undefined ? parseCsv(frontmatter.defaultTools) ?? null : undefined,
 		contextMode: parseContextMode(frontmatter.contextMode),
-		maxTurns: frontmatter.maxTurns ? parseInt(frontmatter.maxTurns, 10) || undefined : undefined,
+		maxTurns: (() => { const n = parseInt(frontmatter.maxTurns, 10); return Number.isFinite(n) && n > 0 ? n : undefined; })(),
 		disabled: frontmatter.disabled === "true" || frontmatter.enabled === "false",
 			routing: triggers || useWhen || avoidWhen || cost || category ? { triggers, useWhen, avoidWhen, cost, category } : undefined,
 		};

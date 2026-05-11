@@ -91,6 +91,12 @@ export function atomicWriteFile(filePath: string, content: string): void {
 	const O_NOFOLLOW = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
 	try {
 		const fd = fs.openSync(tempPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, 0o644);
+		// Post-open verification: on Windows O_NOFOLLOW is 0, so verify FD is a regular file
+		const openedStat = fs.fstatSync(fd);
+		if (!openedStat.isFile()) {
+			fs.closeSync(fd);
+			throw new Error(`Refusing to write: opened path is not a regular file: ${tempPath}`);
+		}
 		fs.writeSync(fd, content, undefined, "utf-8");
 		fs.closeSync(fd);
 		__test__renameWithRetry(tempPath, filePath);
@@ -112,6 +118,12 @@ export async function atomicWriteFileAsync(filePath: string, content: string): P
 	try {
 		const O_NOFOLLOW = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
 		const fd = await fs.promises.open(tempPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, 0o644);
+		// Post-open verification: on Windows O_NOFOLLOW is 0, so verify FD is a regular file
+		const openedStat = await fd.stat();
+		if (!openedStat.isFile()) {
+			await fd.close();
+			throw new Error(`Refusing to write: opened path is not a regular file: ${tempPath}`);
+		}
 		await fd.writeFile(content, "utf-8");
 		await fd.close();
 		try {
@@ -154,6 +166,10 @@ export async function atomicWriteJsonAsync<T>(filePath: string, value: T): Promi
 }
 
 export function readJsonFile<T>(filePath: string): T | undefined {
-	if (!fs.existsSync(filePath)) return undefined;
-	return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+	try {
+		if (!fs.existsSync(filePath)) return undefined;
+		return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+	} catch {
+		return undefined;
+	}
 }

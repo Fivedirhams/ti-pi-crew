@@ -69,9 +69,11 @@ export async function runLiveTask(input: RunLiveTaskInput): Promise<RunLiveTaskO
 	};
 	const attemptStartedAt = new Date();
 	const isCurrent = input.isCurrent ?? (() => input.signal?.aborted !== true);
-	// Apply agent-level maxTurns override if specified
-	const effectiveRuntimeConfig = (agent.maxTurns && (!input.runtimeConfig?.maxTurns || agent.maxTurns < input.runtimeConfig.maxTurns))
-		? { ...input.runtimeConfig, maxTurns: agent.maxTurns }
+	// Apply agent-level maxTurns override if specified (only positive integers)
+	const agentMax = agent.maxTurns;
+	const effectiveRuntimeConfig = (agentMax != null && agentMax > 0 &&
+		(!input.runtimeConfig?.maxTurns || agentMax < input.runtimeConfig.maxTurns))
+		? { ...input.runtimeConfig, maxTurns: agentMax }
 		: input.runtimeConfig;
 	const liveResult = await runLiveSessionTask({
 		manifest,
