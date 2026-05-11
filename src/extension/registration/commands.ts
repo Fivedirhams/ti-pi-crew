@@ -16,14 +16,17 @@ import { handleTeamManagerCommand } from "../team-manager-command.ts";
 import { loadRunManifestById } from "../../state/state-store.ts";
 import type { TeamRunManifest } from "../../state/types.ts";
 import { readCrewAgents } from "../../runtime/crew-agent-records.ts";
-import { AnimatedMascot } from "../../ui/mascot.ts";
 import * as path from "node:path";
-import { RunDashboard, type RunDashboardSelection } from "../../ui/run-dashboard.ts";
-import { DurableTextViewer } from "../../ui/transcript-viewer.ts";
-import { ConfirmOverlay, type ConfirmOptions } from "../../ui/overlays/confirm-overlay.ts";
-import { MailboxDetailOverlay, type MailboxAction } from "../../ui/overlays/mailbox-detail-overlay.ts";
-import { MailboxComposeOverlay, type MailboxComposeResult } from "../../ui/overlays/mailbox-compose-overlay.ts";
-import { AgentPickerOverlay } from "../../ui/overlays/agent-picker-overlay.ts";
+// Heavy UI modules — lazy-loaded because they're only used in /crew commands.
+// RunDashboard (288ms), DurableTextViewer (658ms), Overlays are unnecessary at Pi startup.
+import type { RunDashboard as RunDashboardType, RunDashboardSelection } from "../../ui/run-dashboard.ts";
+import type { DurableTextViewer as DurableTextViewerType } from "../../ui/transcript-viewer.ts";
+import type { ConfirmOverlay as ConfirmOverlayType, ConfirmOptions } from "../../ui/overlays/confirm-overlay.ts";
+import type { MailboxDetailOverlay as MailboxDetailOverlayType, MailboxAction } from "../../ui/overlays/mailbox-detail-overlay.ts";
+import type { MailboxComposeOverlay as MailboxComposeOverlayType, MailboxComposeResult } from "../../ui/overlays/mailbox-compose-overlay.ts";
+import type { AgentPickerOverlay as AgentPickerOverlayType } from "../../ui/overlays/agent-picker-overlay.ts";
+import type { AnimatedMascot as AnimatedMascotType } from "../../ui/mascot.ts";
+// Eagerly import lightweight modules
 import { dispatchDiagnosticExport, dispatchHealthRecovery, dispatchKillStaleWorkers, dispatchMailboxAck, dispatchMailboxAckAll, dispatchMailboxCompose, dispatchMailboxNudge } from "../../ui/run-action-dispatcher.ts";
 import { DEFAULT_UI } from "../../config/defaults.ts";
 import { listRecentDiagnostic } from "../../runtime/diagnostic-export.ts";
@@ -44,13 +47,50 @@ export interface RegisterTeamCommandsDeps {
 	dismissNotifications?: () => void;
 }
 
+// Lazy-loaded UI module cache — avoids importing 900ms+ of UI at Pi startup.
+// These modules are only needed when user invokes /crew commands.
+let _uiCache: {
+	RunDashboard: typeof RunDashboardType;
+	DurableTextViewer: typeof DurableTextViewerType;
+	ConfirmOverlay: typeof ConfirmOverlayType;
+	MailboxDetailOverlay: typeof MailboxDetailOverlayType;
+	MailboxComposeOverlay: typeof MailboxComposeOverlayType;
+	AgentPickerOverlay: typeof AgentPickerOverlayType;
+	AnimatedMascot: typeof AnimatedMascotType;
+} | undefined;
+async function ui(): Promise<NonNullable<typeof _uiCache>> {
+	if (!_uiCache) {
+		const [rd, tv, co, md, mc, ap, ma] = await Promise.all([
+			import("../../ui/run-dashboard.ts"),
+			import("../../ui/transcript-viewer.ts"),
+			import("../../ui/overlays/confirm-overlay.ts"),
+			import("../../ui/overlays/mailbox-detail-overlay.ts"),
+			import("../../ui/overlays/mailbox-compose-overlay.ts"),
+			import("../../ui/overlays/agent-picker-overlay.ts"),
+			import("../../ui/mascot.ts"),
+		]);
+		_uiCache = {
+			RunDashboard: rd.RunDashboard,
+			DurableTextViewer: tv.DurableTextViewer,
+			ConfirmOverlay: co.ConfirmOverlay,
+			MailboxDetailOverlay: md.MailboxDetailOverlay,
+			MailboxComposeOverlay: mc.MailboxComposeOverlay,
+			AgentPickerOverlay: ap.AgentPickerOverlay,
+			AnimatedMascot: ma.AnimatedMascot,
+		};
+	}
+	return _uiCache;
+}
+
 async function openConfirm(ctx: ExtensionCommandContext, options: ConfirmOptions): Promise<boolean> {
 	if (!ctx.hasUI) return false;
+	const { ConfirmOverlay } = await ui();
 	return await ctx.ui.custom<boolean>((_tui, theme, _keybindings, done) => new ConfirmOverlay(options, done, theme), { overlay: true, overlayOptions: { width: 64, maxHeight: "70%", anchor: "center" } });
 }
 
 async function handleMailboxDashboardAction(ctx: ExtensionCommandContext, runId: string): Promise<void> {
 	if (!ctx.hasUI) return;
+	const { MailboxDetailOverlay } = await ui();
 	const action = await ctx.ui.custom<MailboxAction | undefined>((_tui, theme, _keybindings, done) => new MailboxDetailOverlay({ runId, cwd: ctx.cwd, done, theme }), { overlay: true, overlayOptions: { width: "90%", maxHeight: "85%", anchor: "center" } });
 	if (!action || action.type === "close") return;
 	let resultMessage: string | undefined;
@@ -66,6 +106,7 @@ async function handleMailboxDashboardAction(ctx: ExtensionCommandContext, runId:
 		ok = result.ok;
 		resultMessage = result.message;
 	} else if (action.type === "compose") {
+		const { MailboxComposeOverlay } = await ui();
 		const compose = await ctx.ui.custom<MailboxComposeResult>((_tui, theme, _keybindings, done) => new MailboxComposeOverlay({ done, theme }), { overlay: true, overlayOptions: { width: "90%", maxHeight: "85%", anchor: "center" } });
 		if (compose.type === "cancel") return;
 		const result = await dispatchMailboxCompose(ctx as ExtensionContext, runId, compose.payload);
@@ -74,6 +115,7 @@ async function handleMailboxDashboardAction(ctx: ExtensionCommandContext, runId:
 	} else if (action.type === "nudge") {
 		let agentId = action.agentId;
 		if (!agentId) {
+			const { AgentPickerOverlay } = await ui();
 			const picked = await ctx.ui.custom<{ agentId: string } | undefined>((_tui, theme, _keybindings, done) => new AgentPickerOverlay({ cwd: ctx.cwd, runId, done, theme }), { overlay: true, overlayOptions: { width: 72, maxHeight: "75%", anchor: "center" } });
 			agentId = picked?.agentId;
 		}
@@ -281,6 +323,7 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 		if (ctx.hasUI && loaded) {
 			const agent = readCrewAgents(loaded.manifest).find((item) => item.taskId === selected?.taskId || item.id === selected?.taskId) ?? readCrewAgents(loaded.manifest)[0];
 			const resultText = agent?.resultArtifactPath ? commandText(await handleTeamTool({ action: "api", runId: selected?.runId ?? "", config: { operation: "read-agent-output", agentId: agent.taskId, maxBytes: 64_000 } }, teamCommandContext(ctx))) : "(no result)";
+			const { DurableTextViewer } = await ui();
 			await ctx.ui.custom<undefined>((_tui, theme, _keybindings, done) => new DurableTextViewer("pi-crew result", `${selected?.runId ?? ""}:${agent?.taskId ?? "unknown"}`, resultText.split(/\r?\n/), theme, done), { overlay: true, overlayOptions: { width: "90%", maxHeight: "85%", anchor: "center" } });
 			return;
 		}
@@ -301,6 +344,7 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 			const uiConfig = loadConfig(ctx.cwd).config.ui;
 			const rightPanel = (uiConfig?.dashboardPlacement ?? DEFAULT_UI.dashboardPlacement) === "right";
 			const width = rightPanel ? Math.min(90, Math.max(40, uiConfig?.dashboardWidth ?? DEFAULT_UI.dashboardWidth)) : "90%";
+			const { RunDashboard } = await ui();
 			const selection = await ctx.ui.custom<RunDashboardSelection | undefined>((_tui, theme, _keybindings, done) => new RunDashboard(runs, done, theme, { placement: rightPanel ? "right" : "center", showModel: uiConfig?.showModel, showTokens: uiConfig?.showTokens, showTools: uiConfig?.showTools, snapshotCache: deps.getRunSnapshotCache?.(ctx.cwd), runProvider: () => deps.getManifestCache(ctx.cwd).list(50), registry: deps.getMetricRegistry?.() }), { overlay: true, overlayOptions: rightPanel ? { width, minWidth: 40, maxHeight: "100%", anchor: "top-right", offsetX: 0, offsetY: 0, margin: { top: 0, right: 0, bottom: 0, left: 0 } } : { width, maxHeight: "90%", anchor: "center", margin: 2 } });
 			if (!selection) return;
 			if (selection.action === "reload") continue;
@@ -334,6 +378,7 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 		const effectArg = tokens.find((t) => ["random", "none", "typewriter", "scanline", "rain", "fade", "crt", "glitch", "dissolve"].includes(t));
 		const style = (styleArg as "cat" | "armin" | undefined) ?? uiConfig?.mascotStyle ?? DEFAULT_UI.mascotStyle;
 		const effect = (effectArg as "random" | "none" | "typewriter" | "scanline" | "rain" | "fade" | "crt" | "glitch" | "dissolve" | undefined) ?? uiConfig?.mascotEffect ?? DEFAULT_UI.mascotEffect;
+		const { AnimatedMascot } = await ui();
 		await ctx.ui.custom<undefined>((tui, theme, _keybindings, done) => new AnimatedMascot(theme, () => done(undefined), { frameIntervalMs: style === "armin" ? 33 : 180, autoCloseMs: 7000, requestRender: () => requestRenderTarget(tui), style, effect }), { overlay: true, overlayOptions: { width: style === "armin" ? 48 : 62, maxHeight: "85%", anchor: "center" } });
 	} });
 
