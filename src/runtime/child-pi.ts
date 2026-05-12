@@ -456,6 +456,10 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 			});
 		});
 	} finally {
-		cleanupTempDir(built.tempDir);
+		// cleanupTempDir is already called inside settle(), but guard against
+		// the case where settle() was never reached (spawn throws synchronously).
+		if (built.tempDir && fs.existsSync(built.tempDir)) {
+			cleanupTempDir(built.tempDir);
+		}
 	}
 }
