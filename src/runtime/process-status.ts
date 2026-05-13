@@ -32,6 +32,10 @@ export function isActiveRunStatus(status: string): boolean {
 	return status === "queued" || status === "planning" || status === "running" || status === "waiting";
 }
 
+export function isFinishedRunStatus(status: string): boolean {
+	return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
+}
+
 export function isLikelyOrphanedActiveRun(run: TeamRunManifest, agents: CrewAgentRecord[] = [], now = Date.now(), staleMs = ORPHANED_ACTIVE_RUN_MS): boolean {
 	if (!isActiveRunStatus(run.status)) return false;
 	if (run.async?.pid !== undefined) return false;

@@ -31,6 +31,7 @@ import { childCorrelation, withCorrelation } from "../observability/correlation.
 import { resolveBatchConcurrency } from "./concurrency.ts";
 import { mapConcurrent } from "./parallel-utils.ts";
 import { permissionForRole } from "./role-permission.ts";
+import { registerRunPromise, resolveRunPromise, rejectRunPromise } from "./run-tracker.ts";
 import { CrewCancellationError, buildSyntheticTerminalEvidence, cancellationReasonFromSignal } from "./cancellation.ts";
 import { effectivenessPolicyDecision, evaluateRunEffectiveness, formatRunEffectivenessLines } from "./effectiveness.ts";
 
@@ -548,8 +549,12 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 	let workflow = input.workflow;
 	let manifest = updateRunStatus(input.manifest, "running", input.executeWorkers ? "Executing team workflow." : "Creating workflow prompts and placeholder results.");
 
+	const runPromise = registerRunPromise(manifest.runId);
+
 	try {
-		return await executeTeamRunCore(input, manifest, workflow);
+		const result = await executeTeamRunCore(input, manifest, workflow);
+		resolveRunPromise(manifest.runId, result);
+		return result;
 	} catch (error) {
 		// P1: Catch unhandled errors — ensure manifest/tasks/agents are terminal so they don't stay "running" forever.
 		const message = error instanceof Error ? error.message : String(error);
@@ -578,7 +583,9 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 		} catch {
 			// Best-effort — state write may also fail
 		}
-		return { manifest, tasks };
+		const result = { manifest, tasks };
+		resolveRunPromise(manifest.runId, result);
+		return result;
 	}
 }
 
