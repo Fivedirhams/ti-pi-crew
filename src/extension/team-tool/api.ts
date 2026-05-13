@@ -233,7 +233,7 @@ export async function handleApi(params: TeamToolParamsValue, ctx: TeamContext): 
 		try {
 			const live = getLiveAgent(agentId);
 			if (live && live.runId !== loaded.manifest.runId) return result(`Live agent '${agentId}' does not belong to run ${loaded.manifest.runId}.`, { action: "api", status: "error", runId: loaded.manifest.runId }, true);
-				if (live && live.workspaceId !== loaded.manifest.stateRoot) return result(`Live agent '${agentId}' does not belong to workspace ${loaded.manifest.stateRoot}.`, { action: "api", status: "error", runId: loaded.manifest.runId }, true);
+			if (live && live.workspaceId !== loaded.manifest.cwd) return result(`Live agent '${agentId}' does not belong to workspace ${loaded.manifest.cwd}.`, { action: "api", status: "error", runId: loaded.manifest.runId }, true);
 			if (!live && (operation === "steer-agent" || operation === "follow-up-agent")) throw new Error(`Live agent '${agentId}' not found.`);
 			const liveTaskId = live?.taskId;
 			if ((operation === "steer-agent" || operation === "follow-up-agent") && !liveTaskId) throw new Error(`Live agent '${agentId}' not found.`);

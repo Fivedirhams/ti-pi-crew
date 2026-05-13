@@ -48,6 +48,7 @@ test("mock live-session suppresses owner callbacks when stale", async () => {
 			step: { id: "execute", role: "executor", task: "do" } as never,
 			agent: { name: "executor", description: "Executor", source: "builtin", filePath: "executor.md", systemPrompt: "Do it" },
 			prompt: "do it",
+			workspaceId: cwd,
 			onEvent: (event) => events.push(event),
 			onOutput: (text) => outputs.push(text),
 			isCurrent: () => false,
@@ -76,6 +77,7 @@ test("live task production path passes stale owner guard", async () => {
 			step: { id: "execute", role: "executor", task: "do" },
 			agent: { name: "executor", description: "Executor", source: "builtin", filePath: "executor.md", systemPrompt: "Do it" },
 			prompt: "do it",
+			workspaceId: cwd,
 			isCurrent: () => false,
 		});
 		assert.equal(result.exitCode, 0);
@@ -97,6 +99,7 @@ test("mock live-session keeps terminal live agents for resume but excludes them 
 			step: { id: "execute", role: "executor", task: "do" } as never,
 			agent: { name: "executor", description: "Executor", source: "builtin", filePath: "executor.md", systemPrompt: "Do it" },
 			prompt: "do it",
+			workspaceId: cwd,
 		});
 		assert.equal(result.exitCode, 0);
 		assert.equal(listLiveAgents().length, 1);

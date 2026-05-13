@@ -21,7 +21,7 @@
  * Requirements: GitHub CLI (`gh`) installed and authenticated.
  * Repo resolution: git remote get-url origin from cwd.
  */
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -275,7 +275,7 @@ function formatListItem(scheme: "issue" | "pr", repo: string, item: GitHubListIt
 
 function runGh(cwd: string, args: string[]): string {
 	try {
-		return execSync(["gh", ...args].join(" "), {
+		return execFileSync("gh", args, {
 			cwd,
 			encoding: "utf-8",
 			timeout: 30_000,
@@ -288,10 +288,9 @@ function runGh(cwd: string, args: string[]): string {
 }
 
 function ghJson<T>(cwd: string, args: string[]): T {
-	const jsonOut = execSync(
-		`gh ${args.map(a => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`,
-		{ cwd, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] }
-	);
+	const jsonOut = execFileSync("gh", args, {
+		cwd, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"],
+	});
 	try {
 		return JSON.parse(jsonOut) as T;
 	} catch {
@@ -367,7 +366,7 @@ export function resolveGitHubUrl(parsed: Parsed, scheme: "issue" | "pr", cwd: st
 	if (parsed.kind === "pr-diff") {
 		if (parsed.mode === "all") {
 			try {
-				const diff = execSync(`gh pr diff ${parsed.number} --repo ${repo}`, {
+				const diff = execFileSync("gh", ["pr", "diff", String(parsed.number), "--repo", repo], {
 					cwd,
 					encoding: "utf-8",
 					timeout: 30_000,
@@ -385,9 +384,9 @@ export function resolveGitHubUrl(parsed: Parsed, scheme: "issue" | "pr", cwd: st
 
 		if (parsed.mode === "list") {
 			try {
-				const raw = execSync(
-					`gh pr view ${parsed.number} --repo ${repo} --json files --jq '.files[] | "\(.filename) +\(.additions) -\(.deletions) [\(.status)]"'`,
-					{ cwd, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] }
+				const raw = execFileSync(
+					"gh", ["pr", "view", String(parsed.number), "--repo", repo, "--json", "files", "--jq", ".files[] | \"\(.filename) +\(.additions) -\(.deletions) [\(.status)]\""],
+					{ cwd, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] },
 				);
 				const fileLines = raw.split("\n").filter(Boolean);
 				const header = `# Pull Request Diff: ${repo}#${parsed.number} (${fileLines.length} file${fileLines.length === 1 ? "" : "s"})`;
@@ -413,7 +412,7 @@ export function resolveGitHubUrl(parsed: Parsed, scheme: "issue" | "pr", cwd: st
 		if (scheme === "issue") {
 			const args = ["issue", "view", String(single.number), "--repo", repo];
 			if (!single.comments) args.push("--comments", "false");
-			content = execSync(["gh", ...args].join(" "), {
+			content = execFileSync("gh", args, {
 				cwd,
 				encoding: "utf-8",
 				timeout: 30_000,
@@ -422,7 +421,7 @@ export function resolveGitHubUrl(parsed: Parsed, scheme: "issue" | "pr", cwd: st
 		} else {
 			const args = ["pr", "view", String(single.number), "--repo", repo];
 			if (!single.comments) args.push("--comments", "false");
-			content = execSync(["gh", ...args].join(" "), {
+			content = execFileSync("gh", args, {
 				cwd,
 				encoding: "utf-8",
 				timeout: 30_000,

@@ -100,6 +100,9 @@ export function scanConflictLines(lines: readonly string[], firstLineNumber: num
 				partial.separatorLine = ln;
 				partial.theirsLines = [];
 				phase = "theirs";
+			} else if (phase === "theirs" && partial?.theirsLines) {
+				// ======= inside theirs content — treat as content, not marker
+				partial.theirsLines.push(line);
 			} else {
 				partial = null;
 				phase = "idle";
@@ -150,29 +153,7 @@ export async function scanFileForConflicts(
 	absolutePath: string,
 	options: { maxBytes?: number } = {},
 ): Promise<{ blocks: ConflictBlock[]; scanTruncated: boolean }> {
-	const maxBytes = options.maxBytes ?? SCAN_FILE_DEFAULT_MAX_BYTES;
-	let text: string;
-	let scanTruncated = false;
-	try {
-		const stat = fs.statSync(absolutePath);
-		if (stat.size > maxBytes) {
-			scanTruncated = true;
-			const fd = fs.openSync(absolutePath, "r");
-			try {
-				const buf = Buffer.alloc(maxBytes);
-				fs.readSync(fd, buf, 0, maxBytes, 0);
-				text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-			} finally {
-				fs.closeSync(fd);
-			}
-		} else {
-			text = fs.readFileSync(absolutePath, "utf-8");
-		}
-	} catch {
-		return { blocks: [], scanTruncated: false };
-	}
-	const lines = text.split("\n");
-	return { blocks: scanConflictLines(lines, 1), scanTruncated };
+	return scanFileForConflictsSync(absolutePath, options);
 }
 
 /**

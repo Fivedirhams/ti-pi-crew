@@ -50,9 +50,10 @@ export class LiveConversationOverlay {
 		this.pollTimer = setInterval(() => {
 			if (this.closed) return;
 			this.frame++;
-			this.refreshSummary();
+			try { this.refreshSummary(); } catch { /* ignore */ }
 		}, 200);
-		this.refreshSummary();
+		this.pollTimer.unref();
+		try { this.refreshSummary(); } catch { /* ignore */ }
 	}
 
 	private refreshSummary(): void {

@@ -54,7 +54,7 @@ test("runTeamTask writes capability inventory metadata for scaffold runs", async
 		const created = createRunManifest({ cwd, team, workflow, goal: "capabilities" });
 		const task = created.tasks[0]!;
 
-		const result = await runTeamTask({ manifest: created.manifest, tasks: created.tasks, task, step: workflow.steps[0]!, agent, executeWorkers: false, runtimeKind: "scaffold", modelOverride: "override/model", teamRoleModel: "team/model", skillOverride: ["safe-bash"] });
+		const result = await runTeamTask({ manifest: created.manifest, tasks: created.tasks, task, step: workflow.steps[0]!, agent, executeWorkers: false, runtimeKind: "scaffold", workspaceId: cwd, modelOverride: "override/model", teamRoleModel: "team/model", skillOverride: ["safe-bash"] });
 
 		const relativePath = `metadata/${task.id}.capabilities.json`;
 		const capabilityArtifact = result.manifest.artifacts.find((artifact) => artifact.path.replaceAll("\\", "/").endsWith(relativePath));

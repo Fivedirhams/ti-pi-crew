@@ -25,7 +25,7 @@ test("runTeamTask writes stable prompt pipeline metadata for scaffold runs", asy
 		const created = createRunManifest({ cwd, team, workflow, goal: "pipeline" });
 		const task = created.tasks[0]!;
 
-		const result = await runTeamTask({ manifest: created.manifest, tasks: created.tasks, task, step: workflow.steps[0]!, agent, executeWorkers: false, runtimeKind: "scaffold" });
+		const result = await runTeamTask({ manifest: created.manifest, tasks: created.tasks, task, step: workflow.steps[0]!, agent, executeWorkers: false, runtimeKind: "scaffold", workspaceId: cwd });
 
 		const relativePath = `metadata/${task.id}.prompt-pipeline.json`;
 		const pipelineArtifact = result.manifest.artifacts.find((artifact) => artifact.path.replaceAll("\\", "/").endsWith(relativePath));
@@ -61,7 +61,7 @@ test("prompt pipeline records disabled skills without a skill artifact reference
 		const created = createRunManifest({ cwd, team, workflow, goal: "pipeline disabled skills" });
 		const task = created.tasks[0]!;
 
-		await runTeamTask({ manifest: created.manifest, tasks: created.tasks, task, step: workflow.steps[0]!, agent, executeWorkers: false, runtimeKind: "scaffold", skillOverride: false });
+		await runTeamTask({ manifest: created.manifest, tasks: created.tasks, task, step: workflow.steps[0]!, agent, executeWorkers: false, runtimeKind: "scaffold", workspaceId: cwd, skillOverride: false });
 
 		const pipeline = readJson(path.join(created.manifest.artifactsRoot, `metadata/${task.id}.prompt-pipeline.json`));
 		assert.deepEqual(pipeline.stages[2]?.references, []);

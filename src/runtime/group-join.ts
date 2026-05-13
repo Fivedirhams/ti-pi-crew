@@ -193,6 +193,12 @@ export class GroupJoinManager {
 		group.completedRecords.clear();
 		group.agentIds = remaining;
 		group.isStraggler = true;
+
+		// Re-arm timer for remaining stragglers so they aren't silently abandoned
+		if (remaining.size > 0) {
+			group.timeoutHandle = setTimeout(() => this.onTimeout(group), STRAGGLER_TIMEOUT);
+			group.timeoutHandle.unref();
+		}
 	}
 
 	private deliver(group: AgentGroup, partial: boolean): void {

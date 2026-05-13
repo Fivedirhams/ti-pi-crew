@@ -32,6 +32,7 @@ import { resolveBatchConcurrency } from "./concurrency.ts";
 import { mapConcurrent } from "./parallel-utils.ts";
 import { permissionForRole } from "./role-permission.ts";
 import { registerRunPromise, resolveRunPromise, rejectRunPromise } from "./run-tracker.ts";
+import { clearTrackedTaskUsage } from "./usage-tracker.ts";
 import { CrewCancellationError, buildSyntheticTerminalEvidence, cancellationReasonFromSignal } from "./cancellation.ts";
 import { effectivenessPolicyDecision, evaluateRunEffectiveness, formatRunEffectivenessLines } from "./effectiveness.ts";
 
@@ -553,9 +554,14 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 
 	const runPromise = registerRunPromise(manifest.runId);
 
+	const cleanupUsage = (): void => {
+		for (const task of input.tasks) clearTrackedTaskUsage(task.id);
+	};
+
 	try {
 		const result = await executeTeamRunCore(input, manifest, workflow);
 		resolveRunPromise(manifest.runId, result);
+		cleanupUsage();
 		return result;
 	} catch (error) {
 		// P1: Catch unhandled errors — ensure manifest/tasks/agents are terminal so they don't stay "running" forever.
@@ -586,7 +592,8 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 			// Best-effort — state write may also fail
 		}
 		const result = { manifest, tasks };
-		resolveRunPromise(manifest.runId, result);
+		rejectRunPromise(manifest.runId, error instanceof Error ? error : new Error(message));
+		cleanupUsage();
 		return result;
 	}
 }

@@ -43,7 +43,7 @@ test("executeTeamRun records structured cancellation reason", async () => {
 		saveRunTasks(created.manifest, tasks);
 		const controller = new AbortController();
 		controller.abort({ code: "leader_interrupted", message: "leader cancelled run" });
-		const result = await executeTeamRun({ manifest: { ...created.manifest, status: "running" }, tasks, team, workflow, agents: [], executeWorkers: false, signal: controller.signal });
+		const result = await executeTeamRun({ manifest: { ...created.manifest, status: "running" }, tasks, team, workflow, agents: [], executeWorkers: false, signal: controller.signal, workspaceId: cwd });
 		assert.equal(result.manifest.status, "cancelled");
 		assert.match(result.manifest.summary ?? "", /leader_interrupted/);
 		assert.match(result.tasks[0]?.error ?? "", /leader cancelled run/);
@@ -64,7 +64,7 @@ test("executeTeamRun blocks instead of completing when tasks are waiting", async
 		const created = createRunManifest({ cwd, team, workflow, goal: "wait" });
 		const tasks: TeamTaskState[] = [{ id: "wait", runId: created.manifest.runId, stepId: "wait", role: "worker", agent: "worker", title: "wait", status: "waiting", dependsOn: [], cwd }];
 		saveRunTasks(created.manifest, tasks);
-		const result = await executeTeamRun({ manifest: { ...created.manifest, status: "running" }, tasks, team, workflow, agents: [], executeWorkers: false });
+		const result = await executeTeamRun({ manifest: { ...created.manifest, status: "running" }, tasks, team, workflow, agents: [], executeWorkers: false, workspaceId: cwd });
 		assert.equal(result.manifest.status, "blocked");
 		assert.match(result.manifest.summary ?? "", /Waiting for response/);
 	} finally {

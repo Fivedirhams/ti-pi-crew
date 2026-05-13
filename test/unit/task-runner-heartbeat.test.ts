@@ -19,7 +19,7 @@ test("runTeamTask refreshes worker heartbeat while child JSON events stream", as
 		const created = createRunManifest({ cwd, team: team as never, workflow: workflow as never, goal: "heartbeat" });
 		const task = created.tasks[0]!;
 		const staleHeartbeat = { workerId: task.id, lastSeenAt: "2026-01-01T00:00:00.000Z", alive: true };
-		await runTeamTask({ manifest: created.manifest, tasks: [{ ...task, heartbeat: staleHeartbeat }], task: { ...task, heartbeat: staleHeartbeat }, step: workflow.steps[0] as never, agent: agent as never, executeWorkers: true, runtimeKind: "child-process" });
+		await runTeamTask({ manifest: created.manifest, tasks: [{ ...task, heartbeat: staleHeartbeat }], task: { ...task, heartbeat: staleHeartbeat }, step: workflow.steps[0] as never, agent: agent as never, executeWorkers: true, runtimeKind: "child-process", workspaceId: cwd });
 		const loaded = loadRunManifestById(cwd, created.manifest.runId);
 		const updated = loaded?.tasks[0]?.heartbeat;
 		assert.ok(updated);
