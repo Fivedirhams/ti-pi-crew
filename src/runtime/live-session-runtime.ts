@@ -5,6 +5,7 @@ import type { CrewRuntimeConfig } from "../config/config.ts";
 import type { TeamRunManifest, TeamTaskState, UsageState } from "../state/types.ts";
 import { buildMemoryBlock } from "./agent-memory.ts";
 import { trackTaskUsage } from "./usage-tracker.ts";
+import { createStreamingOutput, type StreamingOutputHandle } from "./streaming-output.ts";
 import { registerLiveAgent, disposeLiveAgentSession, terminateLiveAgent, updateLiveAgentStatus } from "./live-agent-manager.ts";
 import { applyLiveAgentControlRequest, applyLiveAgentControlRequests, type LiveAgentControlCursor } from "./live-agent-control.ts";
 import { subscribeLiveControlRealtime } from "./live-control-realtime.ts";
@@ -306,6 +307,7 @@ export async function probeLiveSessionRuntime(): Promise<LiveSessionUnavailableR
 
 export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<LiveSessionRunResult> {
 	const isCurrent = input.isCurrent ?? (() => true);
+	let streamOut: StreamingOutputHandle | undefined;
 
 	// G1: Capture yield result from custom tool callback
 	let customToolYieldResult: YieldResult | undefined;
@@ -410,6 +412,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 		}
 
 		registerLiveAgent({ agentId, runId: input.manifest.runId, taskId: input.task.id, session, status: "running" });
+		streamOut = createStreamingOutput(input.manifest, input.task.id);
 		let controlCursor: LiveAgentControlCursor = { offset: 0 };
 		const seenControlRequestIds = new Set<string>();
 		let controlBusy = false;
@@ -468,6 +471,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 				const text = [...eventText(event), ...finalAssistantText(event)].join("\n");
 				if (text.trim()) {
 					stdout += `${text}\n`;
+					streamOut?.write(text + "\n");
 					input.onOutput?.(text);
 				}
 				// Phase 1: collect events for yield detection
@@ -613,6 +617,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 		unsubscribe?.();
 		unsubscribeControlRealtime?.();
 		if (controlTimer) clearInterval(controlTimer);
+		streamOut?.close();
 		if (input.signal?.aborted) {
 			await terminateLiveAgent(agentId, "cancelled");
 		} else {

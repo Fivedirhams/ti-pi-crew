@@ -7,6 +7,7 @@ import { registerAutonomousPolicy } from "./autonomous-policy.ts";
 import { startAsyncRunNotifier, stopAsyncRunNotifier, type AsyncNotifierState } from "./async-notifier.ts";
 import { notifyActiveRuns } from "./session-summary.ts";
 import { LiveRunSidebar } from "../ui/live-run-sidebar.ts";
+import { loadCrewSettings, applyCrewSettingsToConfig } from "../runtime/settings-store.ts";
 import { registerPiCrewRpc, type PiCrewRpcHandle } from "./cross-extension-rpc.ts";
 import { stopCrewWidget, updateCrewWidget, type CrewWidgetState } from "../ui/crew-widget.ts";
 import { clearPiCrewPowerbar, disposePowerbarCoalescer, registerPiCrewPowerbarSegments, requestPowerbarUpdate, resetPowerbarDedupState, updatePiCrewPowerbar } from "../ui/powerbar-publisher.ts";
@@ -468,6 +469,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 
 
 		const loadedConfig = loadConfig(ctx.cwd);
+		applyCrewSettingsToConfig(loadedConfig.config, loadCrewSettings(ctx.cwd));
 		autoRecoveryLast.clear();
 		configureNotifications(ctx);
 		configureObservability(ctx);

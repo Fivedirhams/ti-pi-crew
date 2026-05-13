@@ -90,3 +90,14 @@ export function saveCrewSettings(s: CrewSettings, cwd: string = process.cwd()): 
 		return false;
 	}
 }
+
+export function applyCrewSettingsToConfig(
+	config: { limits?: { maxConcurrentWorkers?: number }; runtime?: { maxTurns?: number; graceTurns?: number; groupJoin?: string }; notifierIntervalMs?: number },
+	settings: CrewSettings,
+): void {
+	if (settings.maxConcurrent != null && config.limits) config.limits.maxConcurrentWorkers = settings.maxConcurrent;
+	if (settings.defaultMaxTurns != null && config.runtime) config.runtime.maxTurns = settings.defaultMaxTurns;
+	if (settings.graceTurns != null && config.runtime) config.runtime.graceTurns = settings.graceTurns;
+	if (settings.defaultJoinMode != null && config.runtime) config.runtime.groupJoin = settings.defaultJoinMode;
+	if (settings.notifierIntervalMs != null) config.notifierIntervalMs = settings.notifierIntervalMs;
+}
