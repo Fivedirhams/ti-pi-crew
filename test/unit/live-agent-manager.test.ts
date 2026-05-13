@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearLiveAgentsForTest, followUpLiveAgent, listActiveLiveAgents, listLiveAgents, registerLiveAgent, terminateLiveAgent } from "../../src/runtime/live-agent-manager.ts";
+import { clearLiveAgentsForTest, disposeLiveAgentSession, followUpLiveAgent, listActiveLiveAgents, listLiveAgents, registerLiveAgent, terminateLiveAgent } from "../../src/runtime/live-agent-manager.ts";
 
 test("followUpLiveAgent queues and flushes pending follow-ups through prompt", async () => {
 	const prompts: string[] = [];
@@ -36,6 +36,20 @@ test("listActiveLiveAgents excludes terminal handles kept for resume", () => {
 		registerLiveAgent({ agentId: "active", taskId: "task2", runId: "run", status: "running", session: {} });
 		assert.equal(listLiveAgents().length, 2);
 		assert.deepEqual(listActiveLiveAgents().map((agent) => agent.agentId), ["active"]);
+	} finally {
+		clearLiveAgentsForTest();
+	}
+});
+
+test("disposeLiveAgentSession frees session resources without removing handle", () => {
+	const calls: string[] = [];
+	try {
+		registerLiveAgent({ agentId: "agent", taskId: "task", runId: "run", status: "completed", session: { dispose: () => { calls.push("dispose"); } } });
+		disposeLiveAgentSession("agent");
+		assert.deepEqual(calls, ["dispose"]);
+		// Handle must remain in registry for resume/follow-up
+		assert.equal(listLiveAgents().length, 1);
+		assert.equal(listLiveAgents()[0]?.agentId, "agent");
 	} finally {
 		clearLiveAgentsForTest();
 	}

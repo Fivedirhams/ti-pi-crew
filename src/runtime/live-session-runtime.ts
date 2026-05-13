@@ -4,7 +4,7 @@ import type { AgentConfig } from "../agents/agent-config.ts";
 import type { CrewRuntimeConfig } from "../config/config.ts";
 import type { TeamRunManifest, TeamTaskState, UsageState } from "../state/types.ts";
 import { buildMemoryBlock } from "./agent-memory.ts";
-import { registerLiveAgent, removeLiveAgentHandle, terminateLiveAgent, updateLiveAgentStatus } from "./live-agent-manager.ts";
+import { registerLiveAgent, disposeLiveAgentSession, terminateLiveAgent, updateLiveAgentStatus } from "./live-agent-manager.ts";
 import { applyLiveAgentControlRequest, applyLiveAgentControlRequests, type LiveAgentControlCursor } from "./live-agent-control.ts";
 import { subscribeLiveControlRealtime } from "./live-control-realtime.ts";
 import { eventToSidechainType, sidechainOutputPath, writeSidechainEntry } from "./sidechain-output.ts";
@@ -604,10 +604,9 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 		if (input.signal?.aborted) {
 			await terminateLiveAgent(agentId, "cancelled");
 		} else {
-			// Dispose the session and remove the live-agent handle for non-aborted
-			// completions (both success and failure). Without this, session resources
-			// (in-process SDK handles, subscriptions) leak.
-			removeLiveAgentHandle(agentId);
+			// Dispose the session to free resources, but keep the handle in the registry
+			// for resume/follow-up. Removing the handle entirely breaks steer/followUp/resume.
+			disposeLiveAgentSession(agentId);
 		}
 
 		// Phase 8: Emit final health snapshot

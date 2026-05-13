@@ -61,6 +61,12 @@ export function removeLiveAgentHandle(agentId: string): LiveAgentHandle | undefi
 	return handle;
 }
 
+export function disposeLiveAgentSession(agentIdOrTaskId: string): void {
+	const handle = getLiveAgent(agentIdOrTaskId);
+	if (!handle) return;
+	safeDisposeLiveSession(handle);
+}
+
 export async function terminateLiveAgent(agentIdOrTaskId: string, status: CrewAgentRecord["status"] = "stopped"): Promise<LiveAgentHandle | undefined> {
 	const handle = getLiveAgent(agentIdOrTaskId);
 	if (!handle) return undefined;

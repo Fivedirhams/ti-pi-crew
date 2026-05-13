@@ -104,7 +104,11 @@ function withAgentsLock<T>(manifest: TeamRunManifest, fn: () => T): T {
 			break;
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
-			if (code !== "EEXIST") throw error;
+			if (code !== "EEXIST" && code !== "EISDIR") throw error;
+			if (code === "EISDIR") {
+				try { fs.rmSync(filePath, { recursive: true, force: true }); } catch { /* ignore */ }
+				continue;
+			}
 			if (!removeStaleAgentsLock(filePath, AGENTS_LOCK_STALE_MS) && Date.now() > deadline) throw new Error(`Crew agents file is locked by another operation: ${agentsPath(manifest)}`);
 			sleepSync(Math.min(250, 25 * 2 ** attempt));
 			attempt += 1;
