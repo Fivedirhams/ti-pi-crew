@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { allAgents, discoverAgents } from "../agents/discover-agents.ts";
 import { allTeams, discoverTeams } from "../teams/discover-teams.ts";
 import { appendEvent } from "../state/event-log.ts";
@@ -37,6 +39,25 @@ function argValue(name: string): string | undefined {
 	return process.argv[index + 1];
 }
 
+function startInterruptGuard(manifest: { runId: string; stateRoot: string; eventsPath: string }): () => void {
+	const controlPath = path.join(manifest.stateRoot, "foreground-control.json");
+	const interval = setInterval(() => {
+		try {
+			if (!fs.existsSync(controlPath)) return;
+			const parsed = JSON.parse(fs.readFileSync(controlPath, "utf-8")) as { requests?: Array<{ type: string; acknowledged?: boolean }> };
+			const last = parsed.requests?.at(-1);
+			if (last?.type === "interrupt" && last?.acknowledged !== true) {
+				appendEvent(manifest.eventsPath, { type: "async.interrupt_detected", runId: manifest.runId, message: "Background runner detected foreground interrupt request — exiting." });
+				process.exit(130);
+			}
+		} catch {
+			/* ignore read/parse errors */
+		}
+	}, 3_000);
+	interval.unref();
+	return () => clearInterval(interval);
+}
+
 async function main(): Promise<void> {
 	// Scrub macOS malloc vars BEFORE anything else — must be clean for all child processes
 	scrubProcessEnv();
@@ -54,6 +75,7 @@ async function main(): Promise<void> {
 	let { manifest, tasks } = loaded;
 	appendEvent(manifest.eventsPath, { type: "async.started", runId: manifest.runId, data: { pid: process.pid } });
 	writeAsyncStartMarker(manifest, { pid: process.pid, startedAt: new Date().toISOString() });
+	const stopInterruptGuard = startInterruptGuard(manifest);
 
 	try {
 		const agents = allAgents(discoverAgents(cwd));
@@ -82,8 +104,9 @@ async function main(): Promise<void> {
 		try {
 			const loaded = loadRunManifestById(cwd, runId);
 			if (loaded) {
+				// LAZY: live-agent-manager only needed on failure cleanup path; avoid module load at hot path.
 				const { terminateLiveAgentsForRun } = await import("./live-agent-manager.ts");
-				void terminateLiveAgentsForRun(loaded.manifest.runId, "failed").catch(() => {});
+				void terminateLiveAgentsForRun(loaded.manifest.runId, "failed", appendEvent, loaded.manifest.eventsPath).catch(() => {});
 			}
 		} catch { /* best-effort */ }
 		const message = error instanceof Error ? error.message : String(error);
@@ -91,6 +114,7 @@ async function main(): Promise<void> {
 		appendEvent(manifest.eventsPath, { type: "async.failed", runId: manifest.runId, message });
 		process.exitCode = 1;
 	} finally {
+		stopInterruptGuard();
 		stopParentGuard();
 	}
 }

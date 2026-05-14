@@ -6,6 +6,7 @@ import { writeForegroundInterruptRequest } from "../../runtime/foreground-contro
 import { cancellationReasonFromUnknown, buildSyntheticTerminalEvidence, type CancellationReason } from "../../runtime/cancellation.ts";
 import { terminateLiveAgentsForRun } from "../../runtime/live-agent-manager.ts";
 import { appendEvent } from "../../state/event-log.ts";
+import { killProcessPid } from "../../runtime/child-pi.ts";
 import { logInternalError } from "../../utils/internal-error.ts";
 import { executeHook, appendHookEvent } from "../../hooks/registry.ts";
 import type { PiTeamsToolResult } from "../tool-result.ts";
@@ -150,7 +151,19 @@ export async function handleCancel(params: TeamToolParamsValue, ctx: TeamContext
 	if (hookReport.outcome === "block") {
 		return result(`Cancel blocked by hook: ${hookReport.reason ?? "before_cancel hook blocked the operation."}`, { action: "cancel", status: "error", runId: loaded.manifest.runId }, true);
 	}
-	await terminateLiveAgentsForRun(loaded.manifest.runId, "cancelled");
+	await terminateLiveAgentsForRun(loaded.manifest.runId, "cancelled", appendEvent, loaded.manifest.eventsPath);
+
+	// Best-effort: kill the async background runner process so it doesn't
+	// overwrite the cancelled state while we hold the run lock.
+	const asyncPid = loaded.manifest.async?.pid;
+	if (asyncPid !== undefined && asyncPid > 0) {
+		try {
+			killProcessPid(asyncPid);
+			appendEvent(loaded.manifest.eventsPath, { type: "async.kill_requested", runId: loaded.manifest.runId, message: "Sent SIGTERM to background runner process.", data: { pid: asyncPid } });
+		} catch (error) {
+			logInternalError("team-tool.handleCancel.killAsync", error, `runId=${loaded.manifest.runId},pid=${asyncPid}`);
+		}
+	}
 
 	return withRunLockSync(loaded.manifest, () => {
 		if ((loaded.manifest.status === "completed" || loaded.manifest.status === "cancelled") && !params.force) return result(`Run ${loaded.manifest.runId} is already ${loaded.manifest.status}; nothing to cancel. Use force: true to mark it cancelled anyway.`, { action: "cancel", status: "ok", runId: loaded.manifest.runId, artifactsRoot: loaded.manifest.artifactsRoot });

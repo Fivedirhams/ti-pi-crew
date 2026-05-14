@@ -39,9 +39,8 @@ function clearHardKillTimer(pid: number | undefined): void {
 	childHardKillTimers.delete(pid);
 }
 
-function killProcessTree(pid: number | undefined, child?: ChildProcess): void {
-	if (!pid || !Number.isInteger(pid) || pid <= 0) return;
-	if (child && child.exitCode !== null) return;
+export function killProcessPid(pid: number): void {
+	if (!Number.isInteger(pid) || pid <= 0) return;
 	try {
 		if (process.platform === "win32") {
 			spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
@@ -72,17 +71,38 @@ function killProcessTree(pid: number | undefined, child?: ChildProcess): void {
 			childHardKillTimers.delete(pid);
 		}, HARD_KILL_MS);
 		hardKillTimer.unref();
-		child?.once("exit", () => clearHardKillTimer(pid));
 		childHardKillTimers.set(pid, hardKillTimer);
 	} catch (error) {
-		logInternalError("child-pi.kill-process-tree", error, `pid=${pid}`);
+		logInternalError("child-pi.kill-process-pid", error, `pid=${pid}`);
 	}
+}
+
+function killProcessTree(pid: number | undefined, child?: ChildProcess): void {
+	if (!pid || !Number.isInteger(pid) || pid <= 0) return;
+	if (child && child.exitCode !== null) return;
+	killProcessPid(pid);
+	child?.once("exit", () => clearHardKillTimer(pid));
 }
 
 export function terminateActiveChildPiProcesses(): number {
 	const entries = [...activeChildProcesses.entries()];
 	for (const [pid, child] of entries) killProcessTree(pid, child);
 	return entries.length;
+}
+
+
+/** Structured lifecycle event emitted by child-pi for critical transitions. */
+export interface ChildPiLifecycleEvent {
+	/** Event discriminator. */
+	type: "spawned" | "spawn_error" | "response_timeout" | "final_drain" | "hard_kill" | "exit" | "close";
+	/** Process ID when available. */
+	pid?: number;
+	/** Exit code for exit/close events. */
+	exitCode?: number | null;
+	/** Error message for error events. */
+	error?: string;
+	/** Timestamp (ISO). */
+	ts: string;
 }
 
 export interface ChildPiRunInput {
@@ -96,6 +116,8 @@ export interface ChildPiRunInput {
 	onStdoutLine?: (line: string) => void;
 	onJsonEvent?: (event: unknown) => void;
 	onSpawn?: (pid: number) => void;
+	/** Structured lifecycle events for durable logging (spawn, crash, timeout, kill, exit). */
+	onLifecycleEvent?: (event: ChildPiLifecycleEvent) => void;
 	maxDepth?: number;
 	finalDrainMs?: number;
 	hardKillMs?: number;
@@ -298,6 +320,9 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 			if (child.pid) {
 				activeChildProcesses.set(child.pid, child);
 				input.onSpawn?.(child.pid);
+				input.onLifecycleEvent?.({ type: "spawned", pid: child.pid, ts: new Date().toISOString() });
+			} else {
+				input.onLifecycleEvent?.({ type: "spawn_error", error: "spawn returned no pid", ts: new Date().toISOString() });
 			}
 			let stdout = "";
 			let stderr = "";
@@ -321,6 +346,7 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 				if (noResponseTimer) clearTimeout(noResponseTimer);
 				noResponseTimer = setTimeout(() => {
 					responseTimeoutHit = true;
+					input.onLifecycleEvent?.({ type: "response_timeout", pid: child.pid, error: `No output for ${responseTimeoutMs}ms`, ts: new Date().toISOString() });
 					killProcessTree(child.pid, child);
 					try {
 						child.kill(process.platform === "win32" ? undefined : "SIGTERM");
@@ -349,6 +375,7 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 					finalDrainTimer = setTimeout(() => {
 						if (settled || childExited) return;
 						forcedFinalDrain = true;
+						input.onLifecycleEvent?.({ type: "final_drain", pid: child.pid, ts: new Date().toISOString() });
 						try {
 							child.kill(process.platform === "win32" ? undefined : "SIGTERM");
 						} catch (error) {
@@ -358,6 +385,7 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 							if (settled || childExited) return;
 							try {
 								hardKilled = true;
+								input.onLifecycleEvent?.({ type: "hard_kill", pid: child.pid, ts: new Date().toISOString() });
 								child.kill(process.platform === "win32" ? undefined : "SIGKILL");
 							} catch (error) {
 								logInternalError("child-pi.final-drain-kill", error, `pid=${child.pid}`);
@@ -424,13 +452,15 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 				stderr = appendBoundedTail(stderr, chunk.toString("utf-8"));
 			});
 			child.on("error", (error) => {
+				input.onLifecycleEvent?.({ type: "spawn_error", pid: child.pid, error: error.message, ts: new Date().toISOString() });
 				settle({ exitCode: null, stdout, stderr, error: error.message });
 			});
-			child.on("exit", () => {
+			child.on("exit", (code) => {
 				if (child.pid) {
 					activeChildProcesses.delete(child.pid);
 					clearHardKillTimer(child.pid);
 				}
+				input.onLifecycleEvent?.({ type: "exit", pid: child.pid, exitCode: code, ts: new Date().toISOString() });
 				childExited = true;
 				clearNoResponseTimer();
 				clearFinalDrainTimers();
@@ -446,6 +476,7 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 					activeChildProcesses.delete(child.pid);
 					clearHardKillTimer(child.pid);
 				}
+				input.onLifecycleEvent?.({ type: "close", pid: child.pid, exitCode, ts: new Date().toISOString() });
 				const timeoutError = responseTimeoutHit && !stderr.trim() ? { error: `Child Pi produced no new output for ${responseTimeoutMs}ms; process was terminated as unresponsive.` } : undefined;
 				const finalExitCode = forcedFinalDrain && !timeoutError ? 0 : exitCode;
 				// A final assistant event is the child Pi contract for "the worker produced its answer".

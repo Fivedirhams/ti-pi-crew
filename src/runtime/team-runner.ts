@@ -563,7 +563,7 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 		resolveRunPromise(manifest.runId, result);
 		cleanupUsage();
 		// Terminate live agents for this run — agents are done when the run ends.
-		void terminateLiveAgentsForRun(manifest.runId, "completed").catch(() => {});
+		void terminateLiveAgentsForRun(manifest.runId, "completed", appendEvent, manifest.eventsPath).catch(() => {});
 		return result;
 	} catch (error) {
 		// P1: Catch unhandled errors — ensure manifest/tasks/agents are terminal so they don't stay "running" forever.
@@ -579,7 +579,7 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 		);
 		manifest = freshManifest;
 		try {
-			await terminateLiveAgentsForRun(manifest.runId);
+			await terminateLiveAgentsForRun(manifest.runId, "failed", appendEvent, manifest.eventsPath);
 			await saveRunTasksAsync(manifest, tasks);
 			const existingRuntimeByTask = new Map(readCrewAgents(manifest).map((agent) => [agent.taskId, agent.runtime]));
 			const globalRuntime = input.runtime?.kind ?? "child-process";

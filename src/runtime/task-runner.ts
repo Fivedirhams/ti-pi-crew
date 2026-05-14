@@ -11,7 +11,7 @@ import type { WorkflowStep } from "../workflows/workflow-config.ts";
 import { captureWorktreeDiff, captureWorktreeDiffStat, prepareTaskWorkspace } from "../worktree/worktree-manager.ts";
 import { buildConfiguredModelRouting, formatModelAttemptNote, isRetryableModelFailure, type ModelAttemptSummary } from "./model-fallback.ts";
 import { parsePiJsonOutput, type ParsedPiJsonOutput } from "./pi-json-output.ts";
-import { runChildPi } from "./child-pi.ts";
+import { runChildPi, type ChildPiLifecycleEvent } from "./child-pi.ts";
 import { buildTaskPacket } from "./task-packet.ts";
 import { executeHook, appendHookEvent } from "../hooks/registry.ts";
 import { createVerificationEvidence } from "./green-contract.ts";
@@ -198,6 +198,9 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 				skillPaths,
 				onSpawn: (pid) => {
 					({ task, tasks } = checkpointTask(manifest, tasks, task, "child-spawned", pid));
+				},
+				onLifecycleEvent: (event: ChildPiLifecycleEvent) => {
+					appendEvent(manifest.eventsPath, { type: `worker.${event.type}` as const, runId: manifest.runId, taskId: task.id, message: `Worker lifecycle: ${event.type}${event.error ? ` error=${event.error}` : ""}${event.exitCode != null ? ` exit=${event.exitCode}` : ""}`, data: { ...event } });
 				},
 				onStdoutLine: (line) => {
 					appendCrewAgentOutput(manifest, task.id, line);

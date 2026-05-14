@@ -122,7 +122,7 @@ export async function handleApi(params: TeamToolParamsValue, ctx: TeamContext): 
 				saveRunTasks(manifest, tasks);
 				appendEvent(manifest.eventsPath, { type: "plan.cancelled", runId: manifest.runId, taskId: approval.planTaskId, message: "Adaptive implementation plan was cancelled.", metadata: { provenance: "api" } });
 				manifest = updateRunStatus(manifest, "cancelled", "Plan approval was cancelled.");
-				void terminateLiveAgentsForRun(manifest.runId, "cancelled").catch(() => {});
+				void terminateLiveAgentsForRun(manifest.runId, "cancelled", appendEvent, manifest.eventsPath).catch(() => {});
 				return result(JSON.stringify({ planApproval: manifest.planApproval, cancelledTasks: tasks.filter((task) => task.status === "cancelled").map((task) => task.id) }, null, 2), { action: "api", status: "ok", runId: manifest.runId, artifactsRoot: manifest.artifactsRoot });
 			});
 		} catch (error) {

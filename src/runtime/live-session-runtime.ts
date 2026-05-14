@@ -320,7 +320,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 		const inherited = input.runtimeConfig?.inheritContext === true && input.parentContext ? ` with inherited context: ${input.parentContext}` : "";
 		const event = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `Mock live-session success for ${input.agent.name}${inherited}` }] } };
 		const mockSession = { steer: async () => {}, prompt: async () => {}, abort: async () => {} };
-		registerLiveAgent({ agentId, runId: input.manifest.runId, taskId: input.task.id, role: input.task.role, agent: input.agent?.name ?? "mock", description: "mock", session: mockSession, status: "running", workspaceId: input.workspaceId });
+		registerLiveAgent({ agentId, runId: input.manifest.runId, taskId: input.task.id, role: input.task.role, agent: input.agent?.name ?? "mock", description: "mock", session: mockSession, status: "running", workspaceId: input.workspaceId }, appendEvent, input.manifest.eventsPath);
 		appendTranscript(input.transcriptPath, event);
 		const sidechainPath = sidechainOutputPath(input.manifest.stateRoot, input.task.id);
 		writeSidechainEntry(sidechainPath, { agentId, type: "user", message: { role: "user", content: input.prompt }, cwd: input.task.cwd });
@@ -429,7 +429,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 			}
 		}
 
-		registerLiveAgent({ agentId, runId: input.manifest.runId, taskId: input.task.id, role: input.task.role, agent: input.agent?.name ?? "unknown", description: input.task.adaptive?.task ?? input.step?.task ?? "", modelName: (resolvedModel as { name?: string })?.name, session, status: "running", workspaceId: input.workspaceId });
+		registerLiveAgent({ agentId, runId: input.manifest.runId, taskId: input.task.id, role: input.task.role, agent: input.agent?.name ?? "unknown", description: input.task.adaptive?.task ?? input.step?.task ?? "", modelName: (resolvedModel as { name?: string })?.name, session, status: "running", workspaceId: input.workspaceId }, appendEvent, input.manifest.eventsPath);
 		streamOut = createStreamingOutput(input.manifest, input.task.id);
 		let controlCursor: LiveAgentControlCursor = { offset: 0 };
 		const seenControlRequestIds = new Set<string>();
@@ -655,7 +655,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 		if (controlTimer) clearInterval(controlTimer);
 		streamOut?.close();
 		if (input.signal?.aborted) {
-			await terminateLiveAgent(agentId, "cancelled");
+			await terminateLiveAgent(agentId, "cancelled", appendEvent, input.manifest.eventsPath);
 		} else {
 			// Dispose the session to free resources, but keep the handle in the registry
 			// for resume/follow-up. Removing the handle entirely breaks steer/followUp/resume.

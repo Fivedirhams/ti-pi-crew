@@ -1,6 +1,7 @@
 import type { CrewAgentRecord } from "./crew-agent-runtime.ts";
 import type { IrcMessage } from "./live-irc.ts";
 import { logInternalError } from "../utils/internal-error.ts";
+import type { appendEvent } from "../state/event-log.ts";
 
 type LiveSessionHandle = {
 	steer?: (text: string) => Promise<void>;
@@ -76,7 +77,7 @@ export function listActiveLiveAgentsByWorkspace(workspaceId: string): LiveAgentH
 	return listActiveLiveAgents().filter((a) => a.workspaceId === workspaceId);
 }
 
-export function registerLiveAgent(input: Omit<LiveAgentHandle, "createdAt" | "updatedAt" | "pendingSteers" | "pendingFollowUps" | "pendingMessages" | "activity"> & { workspaceId: string }): LiveAgentHandle {
+export function registerLiveAgent(input: Omit<LiveAgentHandle, "createdAt" | "updatedAt" | "pendingSteers" | "pendingFollowUps" | "pendingMessages" | "activity"> & { workspaceId: string }, eventLogFn?: typeof appendEvent, eventsPath?: string): LiveAgentHandle {
 	const now = new Date().toISOString();
 	const existing = liveAgents.get(input.agentId);
 	const handle: LiveAgentHandle = {
@@ -98,6 +99,7 @@ export function registerLiveAgent(input: Omit<LiveAgentHandle, "createdAt" | "up
 		},
 	};
 	liveAgents.set(input.agentId, handle);
+	try { if (eventLogFn && eventsPath) eventLogFn(eventsPath, { type: "live_agent.registered", runId: input.runId, taskId: input.taskId, message: `Live agent registered: ${input.agent} (${input.role})`, data: { agentId: input.agentId, role: input.role, agent: input.agent, workspaceId: input.workspaceId } }); } catch { /* non-critical */ }
 	if (handle.pendingSteers.length && typeof handle.session.steer === "function") {
 		const pending = [...handle.pendingSteers];
 		handle.pendingSteers.length = 0;
@@ -138,12 +140,13 @@ export function disposeLiveAgentSession(agentIdOrTaskId: string): void {
 	safeDisposeLiveSession(handle);
 }
 
-export async function terminateLiveAgent(agentIdOrTaskId: string, status: CrewAgentRecord["status"] = "stopped"): Promise<LiveAgentHandle | undefined> {
+export async function terminateLiveAgent(agentIdOrTaskId: string, status: CrewAgentRecord["status"] = "stopped", eventLogFn?: typeof appendEvent, eventsPath?: string): Promise<LiveAgentHandle | undefined> {
 	const handle = getLiveAgent(agentIdOrTaskId);
 	if (!handle) return undefined;
 	handle.status = status;
 	handle.updatedAt = new Date().toISOString();
 	liveAgents.delete(handle.agentId);
+	try { if (eventLogFn && eventsPath) eventLogFn(eventsPath, { type: "live_agent.terminated", runId: handle.runId, taskId: handle.taskId, message: `Live agent terminated: ${handle.agent} status=${status}`, data: { agentId: handle.agentId, status, role: handle.role, workspaceId: handle.workspaceId } }); } catch { /* non-critical */ }
 	try {
 		await handle.session.abort?.();
 	} finally {
@@ -152,9 +155,9 @@ export async function terminateLiveAgent(agentIdOrTaskId: string, status: CrewAg
 	return handle;
 }
 
-export async function terminateLiveAgentsForRun(runId: string, status: CrewAgentRecord["status"] = "failed"): Promise<number> {
+export async function terminateLiveAgentsForRun(runId: string, status: CrewAgentRecord["status"] = "failed", eventLogFn?: typeof appendEvent, eventsPath?: string): Promise<number> {
 	const agents = [...liveAgents.values()].filter((agent) => agent.runId === runId);
-	await Promise.all(agents.map((agent) => terminateLiveAgent(agent.agentId, status)));
+	await Promise.all(agents.map((agent) => terminateLiveAgent(agent.agentId, status, eventLogFn, eventsPath)));
 	return agents.length;
 }
 

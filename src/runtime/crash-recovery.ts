@@ -157,7 +157,7 @@ export function cancelOrphanedRuns(
 			cancelled.push(manifest.runId);
 			cancelledRun = true;
 		});
-		if (cancelledRun) void terminateLiveAgentsForRun(manifest.runId, "cancelled").catch(() => {});
+		if (cancelledRun) void terminateLiveAgentsForRun(manifest.runId, "cancelled", appendEvent, loaded.manifest.eventsPath).catch(() => {});
 	}
 
 	return { cancelled, skipped };
@@ -265,7 +265,7 @@ export function purgeStaleActiveRunIndex(staleThresholdMs = 300_000, now = Date.
 							});
 							saveRunTasks(fullLoaded.manifest, repairedTasks);
 							updateRunStatus(fullLoaded.manifest, "cancelled", "Orphaned run: worker process dead and no recent activity");
-							void terminateLiveAgentsForRun(fullLoaded.manifest.runId, "cancelled").catch(() => {});
+							void terminateLiveAgentsForRun(fullLoaded.manifest.runId, "cancelled", appendEvent, fullLoaded.manifest.eventsPath).catch(() => {});
 						}
 					} catch {
 						// Best-effort manifest cleanup
@@ -299,7 +299,7 @@ export function reconcileAllStaleRuns(cwd: string, manifestCache: ManifestCache,
 			if (result.repaired) {
 				if (result.repairedTasks) saveRunTasks(fresh.manifest, result.repairedTasks);
 				updateRunStatus(fresh.manifest, "failed", `Stale run reconciled: ${result.detail}`);
-				void terminateLiveAgentsForRun(fresh.manifest.runId, "failed").catch(() => {});
+				void terminateLiveAgentsForRun(fresh.manifest.runId, "failed", appendEvent, fresh.manifest.eventsPath).catch(() => {});
 				appendEvent(fresh.manifest.eventsPath, { type: "crew.run.reconciled_stale", runId: manifest.runId, message: result.detail, data: { verdict: result.verdict } });
 			}
 			if (result.verdict !== "healthy") {
