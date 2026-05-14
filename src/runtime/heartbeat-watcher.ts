@@ -58,7 +58,12 @@ export class HeartbeatWatcher {
 	}
 
 	private scheduleTick(): void {
-		this.timer = setTimeout(() => this.tick(), this.opts.pollIntervalMs ?? 5000);
+		// 3.2 — when at least one run has a dead-streak in progress, poll faster
+		// (1s) so operators get notified quickly. Healthy state stays at the
+		// configured interval (default 5s) to keep idle CPU near zero.
+		const baseInterval = this.opts.pollIntervalMs ?? 5000;
+		const interval = this.consecutiveDead.size > 0 ? Math.min(1000, baseInterval) : baseInterval;
+		this.timer = setTimeout(() => this.tick(), interval);
 		this.timer.unref();
 	}
 
