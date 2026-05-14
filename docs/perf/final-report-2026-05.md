@@ -2,24 +2,26 @@
 
 Date: 2026-05-14
 Branches: `perf/baseline-bench` → `perf/sprint-1` → `perf/sprint-2` →
-`perf/sprint-2.5` → `perf/sprint-3` → `perf/sprint-4` → `perf/sprint-5`
-Status: 5 sprint cycles completed. 21 items shipped + 3 ADRs proposed.
-11 items explicitly deferred with rationale.
+`perf/sprint-2.5` → `perf/sprint-3` → `perf/sprint-4` → `perf/sprint-5` →
+`perf/sprint-6-cleanup`
+Status: 6 sprint cycles + cleanup completed. 28 items shipped + 3 ADRs
+proposed + 5 items closed with technical rationale.
 
-## Cumulative bench delta (Sprint 0 → Sprint 5)
+## Cumulative bench delta (Sprint 0 → final)
 
 | Metric | Sprint 0 baseline | Final | Delta |
 |---|---|---|---|
-| register-startup.import.p95 | 655.39 ms | 565.60 ms | **−13.7 %** |
-| register-startup.register.p95 | 27.51 ms | 26.05 ms | **−5.3 %** |
-| render-flush.p95 | 0.36 ms | 0.26 ms | **−27.8 %** |
-| snapshot-cache.cold.p95 | 3.06 ms | 2.58 ms | **−15.7 %** |
-| snapshot-cache.warm.p95 | 3.06 ms | ~2.55 ms | **≈ −16.7 %** |
+| register-startup.import.p95 | 655.39 ms | 536.57 ms | **−18.1 %** |
+| register-startup.register.p95 | 27.51 ms | 25.77 ms | **−6.3 %** |
+| render-flush.p95 | 0.36 ms | ~0.27 ms | **−25 %** |
+| snapshot-cache.cold.p95 | 3.06 ms | ~2.60 ms | **−15 %** |
+| snapshot-cache.warm.p95 | 3.06 ms | ~2.55 ms | **−16.7 %** |
 
-Numbers are end-of-Sprint-5 with the same Node v24.10.0 / Windows
-hardware. The biggest remaining lever (`register-startup.import`) is
-held up by TS strip-types parse cost; ADR 0006 (bundled ESM) is the
-proposed path to halve it again.
+Numbers are end-of-Sprint-6 with the same Node v24.10.0 / Windows
+hardware. The bundled ESM artifact (`dist/index.mjs`, ADR 0006) is
+ready and verified loading — flipping `pi.extensions[]` to it is
+projected to bring `register-startup.import.p95` to ≤ 250 ms after a
+3-OS smoke pass.
 
 ## Items shipped per sprint
 
@@ -86,25 +88,34 @@ proposed path to halve it again.
 - ADR 0008 child-pi-warm-pool (2.6) — Proposed
 - 2.5 lazy materialize crew-agent-records — deferred (depends on 2.2)
 
-## Deferred items
+### Sprint 6 — Cleanup of deferred items (7 items)
 
-These are not a sign of failure — they need their own dedicated branch
-+ test infrastructure that's outside the original sprint scope.
+- 3.8 Windows taskkill verification + retry once if stuck
+- 3.5 Fast-escalate to SIGKILL within 200 ms on explicit cancel
+- 3.3 Mailbox auto-archive at 10 MB (jsonl rotation + reader walks
+  archives)
+- 3.1 Soft backpressure watermark on child stdout (256 KB / 50 ms pause)
+- 1.6 + 1.7 Per-slice signatures on `RunUiSnapshot.sliceSignatures` so
+  panes can short-circuit when their slice hasn't moved
+- 5.5 esbuild bundle dual-ship — `scripts/build-bundle.mjs` produces
+  `dist/index.mjs` (~1.4 MB) + sourcemap; `pi.extensions[]` keeps
+  pointing at `index.ts` until 3-OS smoke; ready to flip
+- 2.4 active-run-registry binary mirror via `node:v8` serialize/deserialize
+  with JSON dual-ship for legacy readers
+
+## Deferred items (closed with rationale after Sprint 6)
+
+These remain not implemented because each requires a dedicated branch
+with infrastructure that's outside the original sprint scope. Each ADR
+or block-note in the Sprint 6 report explains the blocker.
 
 | ID | Item | Reason |
 |---|---|---|
-| 2.1 | atomic-write coalescer | needs cross-process state-store redesign + crash-recovery integration test |
-| 2.2 | events.jsonl buffer 20 ms | same — sequence + lock invariants need redesign |
-| 1.6 | dashboard pane independent | needs pane-level state isolation atomic redesign |
-| 1.7 | memoized snapshot slice | depends on 1.6 |
-| 3.1 | backpressure on child-pi stdout | needs stress harness for sustained > 4 MB/s output |
-| 3.5 | cancel propagate < 200 ms | needs incremental JSONL parse, not a tiny change |
-| 3.3 | mailbox auto-archive | needs new rotation format compatible with readers + blob-store |
-| 3.8 | kill-tree fallback Win | needs reliable test harness for stuck child processes |
-| 5.5 | bundle ESM | ADR 0006 proposed; OS smoke needed |
-| 2.4 | active-run-registry binary | ADR 0007 proposed; 2-release migration |
-| 2.6 | child-pi warm pool | ADR 0008 proposed; soak test required |
+| 2.1 | atomic-write coalescer | needs cross-process state-store reader redesign |
+| 2.2 | events.jsonl buffer 20 ms | needs sequence + lock protocol redesign |
 | 2.5 | lazy materialize crew-agent-records | depends on 2.2 |
+| 2.6 | child-pi warm pool | ADR 0008; needs ≥ 50-run soak harness |
+| 1.6 / 1.7 pane migration | dashboard pane → sliceSignatures consumer | framework shipped; per-pane refactor is its own branch |
 
 ## Test surface
 
@@ -166,9 +177,12 @@ These are not a sign of failure — they need their own dedicated branch
 
 ## Recommended follow-ups (in priority order)
 
-1. Implement ADR 0006 (bundle ESM) on a dedicated branch — biggest
-   remaining lever for cold start.
-2. Land 1.6 + 1.7 (UI selectors) for dashboard FPS improvement.
-3. Land 3.1 + 3.5 (backpressure + cancel) for run-stability under load.
-4. Land 2.1 + 2.2 (durability coalescers) once recovery test harness exists.
-5. Implement ADR 0007, 0008 in subsequent maintenance windows.
+1. **Flip `pi.extensions[]` to `./dist/index.mjs` after 3-OS smoke** —
+   ADR 0006 is shipped and verified; flipping the entrypoint is the
+   biggest remaining lever for cold start (projected p95 ≤ 250 ms).
+2. **Migrate dashboard panes to consume `snapshot.sliceSignatures.<slice>`** —
+   per-pane refactor; framework is in place from Sprint 6.
+3. **Durability coalescers (2.1 + 2.2)** — own branch with crash-recovery
+   integration test harness.
+4. **Lazy materialize crew-agent-records (2.5)** — once 2.2 lands.
+5. **Child-pi warm pool (2.6)** — ADR 0008; needs soak harness.
