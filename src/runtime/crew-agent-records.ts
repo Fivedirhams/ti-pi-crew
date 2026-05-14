@@ -138,6 +138,10 @@ function setAsyncAgentReaderCache(filePath: string, entry: { expiresAt: number; 
 }
 
 export function readCrewAgents(manifest: TeamRunManifest): CrewAgentRecord[] {
+	// 2.5: ensure intra-process coalesced writes are visible to subsequent
+	// readers in the same process. Cross-process readers still see the file
+	// after at most one coalesce window (250 ms).
+	flushPendingAtomicWrites();
 	try {
 		const records = readJsonFileCoalesced(agentsPath(manifest), AGENT_READER_TTL_MS, () => readJsonFile<CrewAgentRecord[]>(agentsPath(manifest)) ?? []);
 		// Validate schema and deduplicate by id to handle concurrent write conflicts
