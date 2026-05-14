@@ -199,6 +199,56 @@ export async function atomicWriteJsonAsync<T>(filePath: string, value: T): Promi
 	await atomicWriteFileAsync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// 2.1 — atomic-write coalescer. Buffer the latest payload per filePath and
+// flush after `coalesceMs` ms (default 50). Multiple writes to the same
+// path within the window collapse to one disk write (last value wins),
+// which is exactly the semantic that team-runner.ts merge loops need for
+// `saveRunTasks` and similar high-frequency state-store paths.
+//
+// Caveat: a `readJsonFile` call between buffer and flush sees the previous
+// on-disk content. Callers that need read-after-write within the window
+// must invoke `flushPendingAtomicWrites()` first (or pass through
+// `atomicWriteJson` which flushes synchronously).
+//
+// Auto-flush hooks: process exit / SIGTERM / SIGINT, plus an exposed
+// `flushPendingAtomicWrites()` for cleanupRuntime.
+interface CoalescedAtomicWrite {
+	content: string;
+	timer: ReturnType<typeof setTimeout>;
+}
+const pendingAtomicWrites = new Map<string, CoalescedAtomicWrite>();
+const DEFAULT_ATOMIC_COALESCE_MS = 50;
+
+export function atomicWriteJsonCoalesced<T>(filePath: string, value: T, coalesceMs = DEFAULT_ATOMIC_COALESCE_MS): void {
+	const content = `${JSON.stringify(value, null, 2)}\n`;
+	const previous = pendingAtomicWrites.get(filePath);
+	if (previous) clearTimeout(previous.timer);
+	const timer = setTimeout(() => flushOnePendingAtomicWrite(filePath), coalesceMs);
+	timer.unref();
+	pendingAtomicWrites.set(filePath, { content, timer });
+}
+
+function flushOnePendingAtomicWrite(filePath: string): void {
+	const entry = pendingAtomicWrites.get(filePath);
+	if (!entry) return;
+	pendingAtomicWrites.delete(filePath);
+	clearTimeout(entry.timer);
+	try {
+		atomicWriteFile(filePath, entry.content);
+	} catch (error) {
+		logInternalError("atomic-write.coalesced-flush", error, filePath);
+	}
+}
+
+/** Flush every queued coalesced write synchronously. Safe to call any time. */
+export function flushPendingAtomicWrites(): void {
+	for (const filePath of [...pendingAtomicWrites.keys()]) flushOnePendingAtomicWrite(filePath);
+}
+
+process.on("exit", () => flushPendingAtomicWrites());
+process.on("SIGTERM", () => flushPendingAtomicWrites());
+process.on("SIGINT", () => flushPendingAtomicWrites());
+
 export function readJsonFile<T>(filePath: string): T | undefined {
 	try {
 		return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
