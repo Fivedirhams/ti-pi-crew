@@ -6,9 +6,11 @@ import * as path from "node:path";
 import { handleTeamTool } from "../../src/extension/team-tool.ts";
 import { buildCrewWidgetLines, updateCrewWidget, type CrewWidgetState } from "../../src/ui/crew-widget.ts";
 import { saveCrewAgents } from "../../src/runtime/crew-agent-records.ts";
+import { clearLiveAgentsForTest } from "../../src/runtime/live-agent-manager.ts";
 import { createRunManifest, loadRunManifestById, saveRunManifest } from "../../src/state/state-store.ts";
 
 test("crew widget renders installed-style run and agent summary lines", async () => {
+	clearLiveAgentsForTest();
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-widget-"));
 	try {
 		fs.mkdirSync(path.join(cwd, ".crew"), { recursive: true });
