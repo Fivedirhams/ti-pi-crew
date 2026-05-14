@@ -443,9 +443,26 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 			};
 
 			input.signal?.addEventListener("abort", abort, { once: true });
+			// 3.1 — soft watermark backpressure. When inbound stdout exceeds
+			// 256KB before the next macrotask, pause for 50ms so the line
+			// observer + ancillary handlers get to drain. Prevents the runaway
+			// case where a chatty child saturates the parent event loop.
+			const BACKPRESSURE_HIGH = 256 * 1024;
+			let backpressureBytes = 0;
+			const releaseBackpressure = (): void => {
+				backpressureBytes = 0;
+				try { child.stdout?.resume(); } catch { /* ignore */ }
+			};
 			child.stdout?.on("data", (chunk: Buffer) => {
 				restartNoResponseTimer();
-				lineObserver.observe(chunk.toString("utf-8"));
+				const text = chunk.toString("utf-8");
+				backpressureBytes += text.length;
+				lineObserver.observe(text);
+				if (backpressureBytes > BACKPRESSURE_HIGH && child.stdout && !child.stdout.isPaused()) {
+					try { child.stdout.pause(); } catch { /* ignore */ }
+					const timer = setTimeout(releaseBackpressure, 50);
+					timer.unref();
+				}
 			});
 			child.stderr?.on("data", (chunk: Buffer) => {
 				restartNoResponseTimer();
