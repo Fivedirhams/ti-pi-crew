@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 export { validateWithSeverity, type ValidationSeverity, type ValidationMode, type ValidationFinding, type ValidationOutcome } from "./validation-types.ts";
 
 export const PiTeamsAutonomyProfileSchema = Type.Union([

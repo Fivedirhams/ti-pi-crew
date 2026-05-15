@@ -133,9 +133,22 @@ function parseWorkflowMaxConcurrency(value: unknown): number | undefined {
 function findResource(ctx: ManagementContext, resource: "agent" | "team" | "workflow", name: string, scope?: string): MutableResource[] {
 	const normalized = sanitizeName(name);
 	const sourceMatches = (item: { name: string; source: ResourceSource }) => (scope === "user" || scope === "project" ? item.source === scope : item.source !== "builtin") && item.name === normalized;
-	if (resource === "agent") return allAgents(discoverAgents(ctx.cwd)).filter(sourceMatches);
-	if (resource === "team") return allTeams(discoverTeams(ctx.cwd)).filter(sourceMatches);
-	return allWorkflows(discoverWorkflows(ctx.cwd)).filter(sourceMatches);
+	// Search in the correct scope array directly to avoid allAgents shadowing issue.
+	if (resource === "agent") {
+		const discovery = discoverAgents(ctx.cwd);
+		const pool = scope === "user" ? discovery.user : scope === "project" ? discovery.project : [...discovery.builtin, ...discovery.user];
+		return pool.filter(sourceMatches);
+	}
+	if (resource === "team") {
+		const discovery = discoverTeams(ctx.cwd);
+		const pool = scope === "user" ? discovery.user : scope === "project" ? discovery.project : [...discovery.builtin, ...discovery.user];
+		return pool.filter(sourceMatches);
+	}
+	{
+		const discovery = discoverWorkflows(ctx.cwd);
+		const pool = scope === "user" ? discovery.user : scope === "project" ? discovery.project : [...discovery.builtin, ...discovery.user];
+		return pool.filter(sourceMatches);
+	}
 }
 
 // Note: only checks agent→team references and defaultWorkflow. Does not detect

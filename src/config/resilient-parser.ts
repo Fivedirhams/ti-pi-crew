@@ -3,7 +3,8 @@
  */
 
 import { PiTeamsConfigSchema } from "../schema/config-schema.ts";
-import { Value } from "typebox/value";
+import { type TSchema } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import { suggestConfigKey } from "./suggestions.ts";
 import {
 	parseConfig,
@@ -76,9 +77,9 @@ export function parseConfigResilient(raw: unknown): ResilientParseResult {
 		if (!(key in raw)) continue;
 		const value = raw[key];
 		const subSchema = (PiTeamsConfigSchema.properties as Record<string, unknown>)[key];
-		if (subSchema && !Value.Check(subSchema as { [key: string]: unknown }, value)) {
+		if (subSchema && !Value.Check(subSchema as TSchema, value)) {
 			// Collect the first error for this field
-			const fieldErrors = [...Value.Errors(subSchema as { [key: string]: unknown }, value)];
+			const fieldErrors = [...Value.Errors(subSchema as TSchema, value)];
 			if (fieldErrors.length > 0) {
 				const first = fieldErrors[0] as unknown as Record<string, unknown>;
 				const msg = typeof first.message === "string" ? first.message : "invalid value";

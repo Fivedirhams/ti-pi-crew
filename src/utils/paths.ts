@@ -69,8 +69,9 @@ function computeRepoRoot(start: string): string | undefined {
 	const home = path.resolve(os.homedir());
 	const tempRoot = path.resolve(os.tmpdir());
 	while (current !== root) {
-		if (hasProjectMarker(current)) return current;
+		// Stop walking before checking markers at home or temp root
 		if (current === home || current === tempRoot) return undefined;
+		if (hasProjectMarker(current)) return current;
 		const parent = path.dirname(current);
 		if (parent === current) break;
 		current = parent;

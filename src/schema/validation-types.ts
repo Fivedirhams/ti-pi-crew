@@ -7,7 +7,7 @@
  * - Values outside recommended ranges → WARNING
  */
 
-import { Value } from "typebox/value";
+import { Value } from "@sinclair/typebox/value";
 import { PiTeamsConfigSchema } from "./config-schema.ts";
 
 // ---------------------------------------------------------------------------
@@ -104,8 +104,11 @@ export function validateWithSeverity(raw: unknown, mode: ValidationMode = DEFAUL
 
 			const field = rawPath.replace(/^\//, "").replace(/\//g, ".") || undefined;
 
-			// Additional properties are less severe in lenient mode
-			if (errRecord.keyword === "additionalProperties") {
+			// Additional properties / unknown keys are less severe in lenient mode.
+			// @sinclair/typebox uses keyword=undefined with message="Unexpected property" for these.
+			const isUnknownProperty = errRecord.keyword === "additionalProperties" ||
+				message === "Unexpected property" || message.startsWith("Unexpected property");
+			if (isUnknownProperty) {
 				findings.push({
 					severity: mode === "lenient" ? "WARNING" : "ERROR",
 					message: `unknown property${field ? ` '${field}'` : ""}: ${message}`,

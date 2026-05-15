@@ -69,6 +69,7 @@ export function cleanupOldArtifacts(artifactsRoot: string, options: ArtifactClea
 		const entries = fs.readdirSync(artifactsRoot, { withFileTypes: true });
 		for (const entry of entries) {
 			if (entry.name === markerFile) continue;
+			if (entry.isSymbolicLink()) continue; // skip symlinks — could escape artifactsRoot
 			const target = path.join(artifactsRoot, entry.name);
 			try {
 				const stat = fs.statSync(target);

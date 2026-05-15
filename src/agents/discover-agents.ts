@@ -111,6 +111,9 @@ export function discoverAgents(cwd: string): AgentDiscoveryResult {
 
 export function allAgents(discovery: AgentDiscoveryResult): AgentConfig[] {
 	const byName = new Map<string, AgentConfig>();
+	// Priority: project > builtin > user for disambiguation.
+	// This means a project agent with the same name as a builtin/user agent is shadowed
+	// (security: project config cannot override trusted builtins).
 	for (const agent of [...discovery.project, ...discovery.builtin, ...discovery.user]) {
 		byName.set(agent.name.toLowerCase(), agent);
 	}

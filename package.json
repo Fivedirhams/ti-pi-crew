@@ -1,6 +1,6 @@
 {
   "name": "pi-crew",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "description": "Pi extension for coordinated AI teams, workflows, worktrees, and async task orchestration",
   "author": "baphuongna",
   "license": "MIT",
@@ -80,7 +80,7 @@
     "cli-highlight": "^2.1.11",
     "diff": "^5.2.0",
     "jiti": "^2.6.1",
-    "typebox": "^1.1.24"
+    "@sinclair/typebox": "^0.34.49"
   },
   "devDependencies": {
     "@mariozechner/pi-agent-core": "^0.65.0",

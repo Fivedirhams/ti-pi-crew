@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 
 const SkillOverride = Type.Unsafe({
 	description: "Skill name(s) to add to role/default skills, an array of skill names, or false to disable all injected skills for this run.",
