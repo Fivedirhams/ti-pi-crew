@@ -203,11 +203,16 @@ export function activeRunEntries(): ActiveRunRegistryEntry[] {
 			if (!fs.existsSync(entry.stateRoot) || !fs.existsSync(entry.manifestPath)) continue;
 			if (fs.lstatSync(entry.stateRoot).isSymbolicLink()) continue;
 			const cached = sharedScanCache.readAndCache("active-manifests", entry.runId, entry.manifestPath);
-			const manifest = (cached?.raw ?? JSON.parse(fs.readFileSync(entry.manifestPath, "utf-8"))) as { status?: unknown; async?: { pid?: number } };
+			const manifest = (cached?.raw ?? JSON.parse(fs.readFileSync(entry.manifestPath, "utf-8"))) as { status?: unknown; updatedAt?: string; async?: { pid?: number } };
 			if (manifest.status !== "queued" && manifest.status !== "planning" && manifest.status !== "running" && manifest.status !== "blocked") continue;
 			// PID liveness check: async runs with dead PID are stale — don't surface them
 			if (manifest.async?.pid) {
 				try { process.kill(manifest.async.pid, 0); } catch { continue; }
+			}
+			// Stale non-async run: live-session/scaffold runs older than 30 min
+			if (!manifest.async) {
+				const updatedAt = typeof manifest.updatedAt === 'string' ? Date.parse(manifest.updatedAt) : NaN;
+				if (Number.isFinite(updatedAt) && Date.now() - updatedAt > 30 * 60 * 1000) continue;
 			}
 			entries.push(entry);
 		} catch {
