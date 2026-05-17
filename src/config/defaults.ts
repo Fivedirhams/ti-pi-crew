@@ -14,7 +14,7 @@ export const DEFAULT_CHILD_PI = {
 
 export const DEFAULT_LIVE_SESSION = {
 	/** Maximum wall-clock time for a single live-session task before abort (ms). */
-	responseTimeoutMs: 5 * 60_000,
+	responseTimeoutMs: 10 * 60_000,  // 10 minutes - increased from 5min for complex verification
 	/** Maximum yield reminder attempts before accepting no-yield. */
 	maxYieldRetries: 3,
 	/** Polling interval for session idle check during yield enforcement (ms). */

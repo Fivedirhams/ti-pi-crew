@@ -58,6 +58,36 @@ function startInterruptGuard(manifest: { runId: string; stateRoot: string; event
 	return () => clearInterval(interval);
 }
 
+/**
+ * CRITICAL: Node.js v24 throws on unhandled rejections by default.
+ * Without this handler, any unhandled promise rejection (e.g., from cleanupTempDir,
+ * terminateLiveAgentsForRun, or other async cleanup) will crash the background runner
+ * BEFORE async.completed is written to the event log.
+ * This causes the async notifier to falsely detect a stuck run after quietMs expires.
+ */
+function setupUnhandledRejectionGuard(state: { cwd?: string; runId?: string; eventsPath?: string }): void {
+	process.on("unhandledRejection", (reason, promise) => {
+		const message = reason instanceof Error ? reason.message : String(reason);
+		console.error("[background-runner] UNHANDLED REJECTION:", reason);
+		try {
+			// Try to write async.failed event if we have the necessary state
+			if (state.eventsPath && state.runId) {
+				appendEvent(state.eventsPath, {
+					type: "async.failed",
+					runId: state.runId,
+					message: `Unhandled rejection: ${message}`,
+					data: { reason: String(reason), handled: false },
+				});
+			}
+		} catch (appendErr) {
+			console.error("[background-runner] Failed to write async.failed event:", appendErr);
+		}
+		process.exitCode = 1;
+		// Give async operations a moment to flush before exit
+		setTimeout(() => process.exit(1), 100);
+	});
+}
+
 async function main(): Promise<void> {
 	// Scrub macOS malloc vars BEFORE anything else — must be clean for all child processes
 	scrubProcessEnv();
@@ -73,6 +103,12 @@ async function main(): Promise<void> {
 	const loaded = loadRunManifestById(cwd, runId);
 	if (!loaded) throw new Error(`Run '${runId}' not found.`);
 	let { manifest, tasks } = loaded;
+
+	// Setup unhandled rejection guard EARLY — must be before any async operations
+	// that might produce unhandled rejections during cleanup.
+	const rejectionGuardState = { cwd, runId, eventsPath: loaded.manifest.eventsPath };
+	setupUnhandledRejectionGuard(rejectionGuardState);
+
 	appendEvent(manifest.eventsPath, { type: "async.started", runId: manifest.runId, data: { pid: process.pid } });
 	writeAsyncStartMarker(manifest, { pid: process.pid, startedAt: new Date().toISOString() });
 	const stopInterruptGuard = startInterruptGuard(manifest);
