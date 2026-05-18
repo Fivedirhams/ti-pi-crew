@@ -85,7 +85,7 @@ test("renderEntries collapses entries to single line and expands to multi-line",
 	assert.ok(expandedLines.length > 2, "expanded entry should produce more lines");
 	assert.match(expandedLines[0]!, /▸/);
 	assert.match(expandedLines[1]!, /▾/);
-	assert.match(expandedLines[2]!, /  /);
+	assert.match(expandedLines[2]!, / {2}/);
 });
 
 test("renderEntries truncates lines to maxWidth", () => {

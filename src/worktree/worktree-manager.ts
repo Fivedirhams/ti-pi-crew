@@ -50,10 +50,13 @@ function linkNodeModulesIfPresent(repoRoot: string, worktreePath: string): boole
 	try { sourceStat = fs.statSync(source); } catch { return false; }
 	if (!sourceStat.isDirectory()) return false;
 	if (fs.existsSync(target)) return false;
+		// M5 fix: log symlink failure reason, especially on Windows non-admin.
 	try {
 		fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir");
 		return true;
-	} catch {
+	} catch (error) {
+		const isWindows = process.platform === "win32";
+		logInternalError("worktree.symlink-fail", error, isWindows ? "Windows non-admin: SeCreateSymbolicLinkPrivilege needed for node_modules symlink" : String(error));
 		return false;
 	}
 }
@@ -86,12 +89,19 @@ function runSetupHook(manifest: TeamRunManifest, task: TeamTaskState, repoRoot: 
 	const trimmed = result.stdout.trim();
 	if (!trimmed) return [];
 	try {
-		// Extract JSON from last line — hooks may output debug logging before JSON
-		const lines = trimmed.split(/\r?\n/);
-		const lastLine = lines[lines.length - 1] ?? trimmed;
-		const parsed = JSON.parse(lastLine) as { syntheticPaths?: unknown };
-		if (!Array.isArray(parsed.syntheticPaths)) return [];
-		return [...new Set(parsed.syntheticPaths.filter((entry): entry is string => typeof entry === "string").map((entry) => normalizeSyntheticPath(worktreePath, entry)))];
+		// Extract JSON — hooks may output debug logging before JSON.
+	// M4 fix: try full trimmed (multi-line JSON object) before falling back to last line.
+	const lines = trimmed.split(/\r?\n/);
+	let parsed: { syntheticPaths?: unknown } | null = null;
+	try {
+		parsed = JSON.parse(trimmed) as { syntheticPaths?: unknown };
+	} catch { /* fall through — try last line */ }
+	if (!parsed && lines.length > 0) {
+		const lastLine = lines[lines.length - 1];
+		try { parsed = JSON.parse(lastLine) as { syntheticPaths?: unknown }; } catch { /* give up */ }
+	}
+	if (!parsed || !Array.isArray(parsed.syntheticPaths)) return [];
+	return [...new Set(parsed.syntheticPaths.filter((entry): entry is string => typeof entry === "string").map((entry) => normalizeSyntheticPath(worktreePath, entry)))];
 	} catch (error) {
 		logInternalError("worktree.setupHook.parse", error, `lastLine=${(trimmed.split(/\r?\n/).pop() ?? "").slice(0, 200)}`);
 		return [];

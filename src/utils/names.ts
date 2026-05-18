@@ -23,5 +23,5 @@ export function parseConfigObject(config: unknown): { value?: Record<string, unk
 }
 
 export function hasOwn(obj: Record<string, unknown>, key: string): boolean {
-	return Object.prototype.hasOwnProperty.call(obj, key);
+	return  Object.hasOwn(obj, key);
 }

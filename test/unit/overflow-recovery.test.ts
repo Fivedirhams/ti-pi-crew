@@ -83,7 +83,7 @@ describe("OverflowRecoveryTracker", () => {
 		// First overflow cycle
 		tracker.feedEvent("task-1", "run-1", "compaction_start");
 		tracker.feedEvent("task-1", "run-1", "auto_retry_start");
-		let state = tracker.getState("task-1");
+		const state = tracker.getState("task-1");
 		assert.equal(state?.compactionCount, 1);
 		assert.equal(state?.retryCount, 1);
 

@@ -8,7 +8,7 @@ import { logInternalError } from "../utils/internal-error.ts";
 import { readJsonlSince, type IncrementalReadState } from "../utils/incremental-reader.ts";
 import { redactSecrets } from "../utils/redaction.ts";
 import { sleepSync } from "../utils/sleep.ts";
-import { needsRotation, compactEventLog } from "./event-log-rotation.ts";
+import { needsRotation, compactEventLog, rotateEventLog } from "./event-log-rotation.ts";
 
 export type TeamEventProvenance = "live_worker" | "test" | "healthcheck" | "replay" | "api" | "background" | "team_runner";
 export type TeamWatcherAction = "act" | "observe" | "ignore";
@@ -64,7 +64,7 @@ let appendCounter = 0;
 /** Simple cross-process lock for an eventsPath to prevent JSONL interleave on concurrent append.
  *  Detects stale locks by checking the owner PID written inside the lock directory.
  */
-function withEventLogLockSync<T>(eventsPath: string, fn: () => T): T {
+export function withEventLogLockSync<T>(eventsPath: string, fn: () => T): T {
 	const lockDir = `${eventsPath}.lock`;
 	const pidFile = path.join(lockDir, "pid");
 	const start = Date.now();
@@ -208,15 +208,43 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 		metadata = { ...metadata, fingerprint: baseMetadata?.fingerprint ?? computeEventFingerprint(fullEvent) };
 		fullEvent.metadata = metadata;
 	}
+	// H1 fix: handle overflow before appending.
+	// 1. Terminal events must always be persisted regardless of size.
+	// 2. Non-terminal events exceeding MAX_EVENTS_BYTES trigger immediate compact.
+	// 3. After compact, if still over limit, rotate.
+	const isTerminal = TERMINAL_EVENT_TYPES.has(fullEvent.type);
+	let skippedDueToSize = false;
+	if (!isTerminal && fs.existsSync(eventsPath)) {
+		const stat = fs.statSync(eventsPath);
+		if (stat.size > MAX_EVENTS_BYTES) {
+			// Try immediate compact (not waiting for counter % 100)
+			try {
+				compactEventLog(eventsPath);
+			} catch (error) {
+				logInternalError("event-log.immediate-compact", error, `eventsPath=${eventsPath}`);
+			}
+			// Check if still too large after compact — if so, rotate
+			if (fs.existsSync(eventsPath)) {
+				const afterCompact = fs.statSync(eventsPath);
+				if (afterCompact.size > MAX_EVENTS_BYTES) {
+					rotateEventLog(eventsPath);
+				}
+			}
+		}
+	}
 	try {
 		if (fs.existsSync(eventsPath) && fs.statSync(eventsPath).size > MAX_EVENTS_BYTES) {
-			logInternalError("event-log.size-limit", new Error(`events file ${eventsPath} exceeds ${MAX_EVENTS_BYTES} bytes`), `eventsPath=${eventsPath}`);
-			return { ...fullEvent, metadata: { ...(fullEvent.metadata ?? { seq: 0, provenance: "team_runner" }), appended: false } };
+			// Only reach here for non-terminal events that still overflow after compact+rotate.
+			// Log and mark as not appended.
+			logInternalError("event-log.size-limit", new Error(`events file ${eventsPath} exceeds ${MAX_EVENTS_BYTES} bytes after compaction`), `eventsPath=${eventsPath}`);
+			skippedDueToSize = true;
 		}
 	} catch (error) {
 		logInternalError("event-log.size-check", error, `eventsPath=${eventsPath}`);
 	}
-	fs.appendFileSync(eventsPath, `${JSON.stringify(redactSecrets(fullEvent))}\n`, "utf-8");
+	if (!skippedDueToSize) {
+		fs.appendFileSync(eventsPath, `${JSON.stringify(redactSecrets(fullEvent))}\n`, "utf-8");
+	}
 	appendCounter++;
 	if (appendCounter % 100 === 0 && needsRotation(eventsPath)) {
 		try { compactEventLog(eventsPath); } catch (error) { logInternalError("event-log.rotation", error, `eventsPath=${eventsPath}`); }

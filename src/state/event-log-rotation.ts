@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { readEvents } from "./event-log.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
+import { logInternalError } from "../utils/internal-error.ts";
 
 export interface RotationConfig {
 	maxFileSizeBytes: number;
@@ -102,6 +103,27 @@ export function compactEventLog(eventsPath: string, config?: Partial<RotationCon
 			eventsRemoved: originalCount - kept.length,
 			eventsKept: kept.length,
 		};
+	}
+}
+
+/**
+ * Rotate an event log file by archiving it with a timestamp.
+ * The current file is renamed to `<eventsPath>.<timestamp>.archive.jsonl`
+ * and a fresh empty file is created in its place.
+ * Readers using `readEvents` will see the new file; archived files can be
+ * picked up by snapshot replay if needed.
+ */
+export function rotateEventLog(eventsPath: string): boolean {
+	if (!fs.existsSync(eventsPath)) return false;
+	try {
+		const ts = new Date().toISOString().replace(/[:.]/g, "-");
+		const archivePath = `${eventsPath}.${ts}.archive.jsonl`;
+		fs.renameSync(eventsPath, archivePath);
+		fs.writeFileSync(eventsPath, "", "utf-8");
+		return true;
+	} catch (error) {
+		logInternalError("event-log.rotate", error, `eventsPath=${eventsPath}`);
+		return false;
 	}
 }
 

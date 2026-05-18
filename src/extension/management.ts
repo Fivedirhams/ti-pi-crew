@@ -170,6 +170,24 @@ function findReferences(ctx: ManagementContext, resource: "agent" | "team" | "wo
 	return refs;
 }
 
+function escapeRegex(str: string): string {
+	return str.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+}
+
+function walkTsFiles(dir: string): string[] {
+	const results: string[] = [];
+	if (!fs.existsSync(dir)) return results;
+	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		const fullPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			results.push(...walkTsFiles(fullPath));
+		} else if (entry.name.endsWith(".ts") || entry.name.endsWith(".md")) {
+			results.push(fullPath);
+		}
+	}
+	return results;
+}
+
 function updateReferencesForRename(ctx: ManagementContext, resource: "agent" | "team" | "workflow", oldName: string, newName: string, scope: MutableSource, dryRun: boolean): string[] {
 	if (oldName === newName) return [];
 	if (resource !== "agent" && resource !== "workflow") return [];
@@ -191,6 +209,40 @@ function updateReferencesForRename(ctx: ManagementContext, resource: "agent" | "
 		if (!dryRun) {
 			backupFile(team.filePath);
 			fs.writeFileSync(team.filePath, serializeTeam(nextTeam), "utf-8");
+		}
+	}
+	// L12 fix: also update workflow step role references when renaming agents.
+	// Workflow files use `role:` to reference agent roles, not agent names.
+	for (const workflow of allWorkflows(discoverWorkflows(ctx.cwd)).filter((w) => w.source === scope)) {
+		let updated = false;
+		const newSteps = workflow.steps.map((step) => {
+			if (step.role === oldName) {
+				updated = true;
+				return { ...step, role: newName };
+			}
+			return step;
+		});
+		if (!updated) continue;
+		changed.push(workflow.filePath);
+		if (!dryRun) {
+			backupFile(workflow.filePath);
+			fs.writeFileSync(workflow.filePath, serializeWorkflow({ ...workflow, steps: newSteps }), "utf-8");
+		}
+	}
+	// L12 fix: update agent references in test fixtures.
+	const testDir = scope === "user" ? path.join(ctx.cwd, ".crew", "test") : path.join(ctx.cwd, "test", "fixtures");
+	if (fs.existsSync(testDir)) {
+		for (const fixture of walkTsFiles(testDir)) {
+			const content = fs.readFileSync(fixture, "utf-8");
+			if (!content.includes(oldName)) continue;
+			const agentPattern = new RegExp('(["\'\\`]agent[="\':\\s]*)' + escapeRegex(oldName) + '(["\'\\`]|\\s)', 'g');
+			const newContent = content.replace(agentPattern, `$1${newName}$2`);
+			if (newContent !== content) {
+				changed.push(fixture);
+				if (!dryRun) {
+					fs.writeFileSync(fixture, newContent, "utf-8");
+				}
+			}
 		}
 	}
 	return changed;

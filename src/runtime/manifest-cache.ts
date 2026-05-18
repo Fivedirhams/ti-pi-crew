@@ -157,7 +157,7 @@ export function createManifestCache(cwd: string, options: ManifestCacheOptions =
 	}
 
 	function loadManifest(runId: string, rootsToCheck: string[]): CachedManifest | undefined {
-		let cached = manifestIndex.get(runId);
+		const cached = manifestIndex.get(runId);
 		if (!isSafePathId(runId)) return undefined;
 		const activeEntry = activeRunEntries().find((entry) => entry.runId === runId);
 		if (activeEntry) {

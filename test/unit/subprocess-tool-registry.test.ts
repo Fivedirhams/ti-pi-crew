@@ -109,7 +109,7 @@ test("extractAll skips handlers that return undefined", () => {
 
 test("shouldTerminate delegation", () => {
 	const registry = createRegistry();
-	let terminated = false;
+	const terminated = false;
 	registry.register("write", {
 		shouldTerminate: (e) => e.isError === true,
 	});

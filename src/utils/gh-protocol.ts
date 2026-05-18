@@ -386,7 +386,7 @@ export function resolveGitHubUrl(parsed: Parsed, scheme: "issue" | "pr", cwd: st
 		if (parsed.mode === "list") {
 			try {
 				const raw = execFileSync(
-					"gh", ["pr", "view", String(parsed.number), "--repo", repo, "--json", "files", "--jq", ".files[] | \"\(.filename) +\(.additions) -\(.deletions) [\(.status)]\""],
+					"gh", ["pr", "view", String(parsed.number), "--repo", repo, "--json", "files", "--jq", ".files[] | \"(.filename) +(.additions) -(.deletions) [(.status)]\""],
 					{ cwd, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] },
 				);
 				const fileLines = raw.split("\n").filter(Boolean);
@@ -408,7 +408,7 @@ export function resolveGitHubUrl(parsed: Parsed, scheme: "issue" | "pr", cwd: st
 		if (parsed.mode === "slice" && parsed.index !== undefined) {
 			try {
 				const raw = execFileSync(
-					"gh", ["pr", "view", String(parsed.number), "--repo", repo, "--json", "files", "--jq", ".files[] | \"\(.filename) +\(.additions) -\(.deletions) [\(.status)]\""],
+					"gh", ["pr", "view", String(parsed.number), "--repo", repo, "--json", "files", "--jq", ".files[] | \"(.filename) +(.additions) -(.deletions) [(.status)]\""],
 					{ cwd, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] },
 				);
 				const fileLines = raw.split("\n").filter(Boolean);

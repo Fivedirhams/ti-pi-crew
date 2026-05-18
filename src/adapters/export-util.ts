@@ -80,18 +80,24 @@ export type ExportableResource =
 	| { kind: "skill"; config: SkillDescriptor };
 
 export function resourcesToExportContent(resources: ExportableResource[]): ExportContent[] {
-	return resources.map((resource): ExportContent => {
+	const results: ExportContent[] = [];
+	for (const resource of resources) {
 		switch (resource.kind) {
 			case "agent":
-				return agentToExportContent(resource.config);
+				results.push(agentToExportContent(resource.config));
+				break;
 			case "team":
-				return teamToExportContent(resource.config);
+				results.push(teamToExportContent(resource.config));
+				break;
 			case "workflow":
-				return workflowToExportContent(resource.config);
+				results.push(workflowToExportContent(resource.config));
+				break;
 			case "skill":
-				return skillToExportContent(resource.config);
+				results.push(skillToExportContent(resource.config));
+				break;
 		}
-	});
+	}
+	return results;
 }
 
 export interface ToolExportResult {

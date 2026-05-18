@@ -142,7 +142,6 @@ function readSkillMarkdown(cwd: string, name: string): { path: string; source: "
 			const stat = fs.statSync(filePath);
 			return rememberSkill(cacheKey, { path: filePath, source: entry.source, content: fs.readFileSync(filePath, "utf-8"), mtimeMs: stat.mtimeMs, size: stat.size });
 		} catch {
-			continue;
 		}
 	}
 	return undefined;

@@ -38,10 +38,19 @@ export function cleanupRunWorktrees(manifest: TeamRunManifest, options: { force?
 	const result: WorktreeCleanupResult = { removed: [], preserved: [], artifactPaths: [] };
 	if (!fs.existsSync(worktreeRoot)) return result;
 
-	for (const entry of fs.readdirSync(worktreeRoot)) {
+	// M3 fix: use withFileTypes to avoid race between readdirSync and statSync.
+	const withFileTypes = fs.readdirSync(worktreeRoot, { withFileTypes: true });
+	for (const entry of withFileTypes) {
 		if (options.signal?.aborted) break;
-		const worktreePath = path.join(worktreeRoot, entry);
-		if (!fs.statSync(worktreePath).isDirectory()) continue;
+		if (!entry.isDirectory()) continue;
+		const worktreePath = path.join(worktreeRoot, entry.name);
+		try {
+			const stat = fs.statSync(worktreePath);
+			if (!stat.isDirectory()) continue;
+		} catch {
+			// Entry deleted between readdir and stat — skip safely.
+			continue;
+		}
 		const dirty = isDirty(worktreePath);
 		if (dirty && !options.force) {
 			const artifact = writeArtifact(manifest.artifactsRoot, {

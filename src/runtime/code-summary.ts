@@ -88,7 +88,7 @@ function findBraceRanges(lines: string[], openPattern: RegExp, minBody: number):
 // ── TypeScript / JavaScript ──
 
 const TS_FN_SIG =
-	/^\s*(export\s+)?(async\s+)?function\s|^\s*(export\s+)?(static\s+|get\s+|set\s+|private\s+|public\s+|protected\s+|readonly\s+)*\*?\s*\w+\s*[\(<]/;
+	/^\s*(export\s+)?(async\s+)?function\s|^\s*(export\s+)?(static\s+|get\s+|set\s+|private\s+|public\s+|protected\s+|readonly\s+)*\*?\s*\w+\s*[(<]/;
 const TS_CLASS_SIG = /^\s*(export\s+)?(default\s+)?(abstract\s+)?class\s/;
 const TS_STRUCT_SIG = /^\s*(export\s+)?(default\s+)?(const|let|var)\s+\w+\s*=\s*(\[[\s]*$|\{[\s]*$)/;
 

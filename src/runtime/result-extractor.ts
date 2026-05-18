@@ -81,7 +81,6 @@ function tryMarkerExtraction(text: string): unknown | undefined {
 					try {
 						return JSON.parse(after.slice(0, jsonEnd));
 					} catch {
-						continue;
 					}
 				}
 			}

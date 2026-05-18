@@ -15,7 +15,7 @@ test("TimeWindowedCounter retains within window and prunes outside", () => {
 });
 
 test("TimeWindowedCounter isolates labels and computes per-second rate", () => {
-	let now = 0;
+	const now = 0;
 	const counter = new TimeWindowedCounter(1000, () => now);
 	counter.inc({ status: "ok" }, 2);
 	counter.inc({ status: "bad" }, 5);

@@ -85,29 +85,34 @@ function renderBlocks(blocks: GuidanceBlock[]): string {
  * Parse the inner marker content and return the set of block IDs present.
  */
 export function extractGuidanceIds(content: string): string[] {
-  const ids: string[] = [];
-  const regex = /<!-- PI-CREW:BLOCK:([^\s>]+) -->/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(content)) !== null) {
-    ids.push(match[1]!);
-  }
-  return ids;
+	const ids: string[] = [];
+	const regex = /<!-- PI-CREW:BLOCK:([^\s>]+) -->/g;
+	let match: RegExpExecArray | null = regex.exec(content);
+	while (match !== null) {
+		const captured = match[1];
+		if (captured !== undefined) ids.push(captured);
+		match = regex.exec(content);
+	}
+	return ids;
 }
 
 /**
  * Parse existing blocks from marker content into a map of id → GuidanceBlock.
  */
 function parseExistingBlocks(inner: string): Map<string, GuidanceBlock> {
-  const map = new Map<string, GuidanceBlock>();
-  const regex =
-    /<!-- PI-CREW:BLOCK:([^\s>]+) -->\n([\s\S]*?)<!-- PI-CREW:\/BLOCK:\1 -->/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(inner)) !== null) {
-    const id = match[1]!;
-    const content = match[2]!;
-    map.set(id, { id, content: content.replace(/\n$/, "") });
-  }
-  return map;
+	const map = new Map<string, GuidanceBlock>();
+	const regex =
+		/<!-- PI-CREW:BLOCK:([^\s>]+) -->\n([\s\S]*?)<!-- PI-CREW:\/BLOCK:\1 -->/g;
+	let match: RegExpExecArray | null = regex.exec(inner);
+	while (match !== null) {
+		const id = match[1];
+		const blockContent = match[2];
+		if (id !== undefined && blockContent !== undefined) {
+			map.set(id, { id, content: blockContent.replace(/\n$/, "") });
+		}
+		match = regex.exec(inner);
+	}
+	return map;
 }
 
 /**

@@ -523,7 +523,13 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 				}
 				input.onLifecycleEvent?.({ type: "close", pid: child.pid, exitCode, ts: new Date().toISOString() });
 				const timeoutError = responseTimeoutHit && !stderr.trim() ? { error: `Child Pi produced no new output for ${responseTimeoutMs}ms; process was terminated as unresponsive.` } : undefined;
-				const finalExitCode = forcedFinalDrain && !timeoutError ? 0 : exitCode;
+				// M6 fix: log when forced final drain converts non-zero exit to 0.
+			// This is expected in normal operation (child finished cleanly but linger was killed),
+			// but the telemetry helps detect regressions where crashes are hidden.
+			if (forcedFinalDrain && !timeoutError && exitCode !== 0) {
+				logInternalError("child-pi.final-drain-zero-exit", new Error(`Child exit code overridden to 0 after forced final drain (original=${exitCode})`), `pid=${child.pid}, finalDrainMs=${finalDrainMs}`);
+			}
+			const finalExitCode = forcedFinalDrain && !timeoutError ? 0 : exitCode;
 				// A final assistant event is the child Pi contract for "the worker produced its answer".
 				// Some Pi processes can linger during post-final cleanup/stdio shutdown; finalDrain terminates
 				// that lingering process so the parent can continue, but it must not turn a completed

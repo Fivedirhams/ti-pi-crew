@@ -5,6 +5,7 @@ import { resolveRealContainedPath } from "../utils/safe-paths.ts";
 import { redactSecrets } from "../utils/redaction.ts";
 import { logInternalError } from "../utils/internal-error.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
+import { withEventLogLockSync } from "./event-log.ts";
 
 export type MailboxDirection = "inbox" | "outbox";
 export type MailboxMessageStatus = "queued" | "delivered" | "acknowledged";
@@ -298,7 +299,10 @@ export function appendMailboxMessage(manifest: TeamRunManifest, message: Omit<Ma
 		repliedAt: message.repliedAt,
 		replyContent: message.replyContent,
 	};
-	fs.appendFileSync(mailboxFile(manifest, complete.direction, complete.taskId), `${JSON.stringify(redactSecrets(complete))}\n`, "utf-8");
+	// H2 fix: wrap append in cross-process lock to prevent interleaving on Windows.
+	withEventLogLockSync(mailboxFile(manifest, complete.direction, complete.taskId), () => {
+		fs.appendFileSync(mailboxFile(manifest, complete.direction, complete.taskId), `${JSON.stringify(redactSecrets(complete))}\n`, "utf-8");
+	});
 	// 3.3 — rotate mailbox file if it has grown past 10 MB. Cheap stat
 	// check; rotates at most once per append.
 	rotateMailboxFileIfNeeded(mailboxFile(manifest, complete.direction, complete.taskId));

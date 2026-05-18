@@ -153,7 +153,6 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 		const logs: string[] = [];
 		let finalStderr = "";
 		modelAttempts = [];
-		transcriptPath = `${manifest.artifactsRoot}/transcripts/${task.id}.jsonl`;
 		let finalCheckpointWritten = false;
 		let lastAgentRecordPersistedAt = 0;
 		let lastHeartbeatPersistedAt = 0;
@@ -184,6 +183,8 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 			}
 		};
 		for (let i = 0; i < attemptModels.length; i++) {
+			// M1 fix: set transcript path per attempt to avoid mixing across fallback attempts.
+			transcriptPath = `${manifest.artifactsRoot}/transcripts/${task.id}.attempt-${i}.jsonl`;
 			const model = attemptModels[i];
 			const attemptStartedAt = new Date();
 			const pendingAttempt: ModelAttemptSummary = { model: model ?? "default", success: false };
@@ -249,7 +250,27 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 			exitCode = childResult.exitCode;
 			finalStdout = childResult.stdout;
 			finalStderr = childResult.stderr;
-			parsedOutput = parsePiJsonOutput(fs.existsSync(transcriptPath) ? fs.readFileSync(transcriptPath, "utf-8") : childResult.stdout);
+				// Cap transcript read to MAX_TRANSCRIPT_BYTES to avoid OOM on huge transcripts.
+			const MAX_TRANSCRIPT_PARSE_BYTES = 5 * 1024 * 1024;
+			let transcriptText = '';
+			if (fs.existsSync(transcriptPath)) {
+				const stat = fs.statSync(transcriptPath);
+				if (stat.size > MAX_TRANSCRIPT_PARSE_BYTES) {
+					const fd = fs.openSync(transcriptPath, 'r');
+					try {
+						const buf = Buffer.alloc(MAX_TRANSCRIPT_PARSE_BYTES);
+						const bytesRead = fs.readSync(fd, buf, 0, MAX_TRANSCRIPT_PARSE_BYTES, stat.size - MAX_TRANSCRIPT_PARSE_BYTES);
+						const raw = buf.slice(0, bytesRead).toString('utf-8');
+						const firstNewline = raw.indexOf('\n');
+						transcriptText = firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw;
+					} finally { fs.closeSync(fd); }
+				} else {
+					transcriptText = fs.readFileSync(transcriptPath, 'utf-8');
+				}
+			} else {
+				transcriptText = childResult.stdout;
+			}
+			parsedOutput = parsePiJsonOutput(transcriptText);
 			error = childResult.error || (childResult.exitCode && childResult.exitCode !== 0 ? childResult.stderr || `Child Pi exited with ${childResult.exitCode}` : undefined);
 			persistHeartbeat(true);
 			persistChildProgress({ type: "attempt_finished" }, true);
@@ -281,7 +302,8 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 		const fallbackReason = usedAttempt > 0 ? modelAttempts[usedAttempt - 1]?.error : undefined;
 		task = { ...task, modelRouting: { requested: modelRoutingPlan.requested, resolved: resolvedModel, fallbackChain: candidates, reason: fallbackReason ?? modelRoutingPlan.reason, usedAttempt } };
 		tasks = updateTask(tasks, task);
-		const sessionUsage = parseSessionUsage(transcriptPath);
+		// Use the last attempt's transcript for session usage.
+		const sessionUsage = parseSessionUsage(transcriptPath ?? `${manifest.artifactsRoot}/transcripts/${task.id}.attempt-${usedAttempt}.jsonl`);
 		const effectiveUsage = parsedOutput?.usage ?? sessionUsage;
 		if (effectiveUsage) {
 			parsedOutput = { ...(parsedOutput ?? { jsonEvents: 0, textEvents: [] }), usage: effectiveUsage };
@@ -289,11 +311,29 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 			tasks = updateTask(tasks, task);
 			upsertCrewAgent(manifest, recordFromTask(manifest, task, "child-process"));
 		}
-		if (fs.existsSync(transcriptPath)) {
+		// M2 fix: use attempt-relative path; cap content at MAX_TRANSCRIPT_ARTIFACT_BYTES.
+		const MAX_TRANSCRIPT_ARTIFACT_BYTES = 5 * 1024 * 1024; // 5MB cap
+		const attemptTranscriptPath = `${manifest.artifactsRoot}/transcripts/${task.id}.attempt-${usedAttempt}.jsonl`;
+		let transcriptContent = '';
+		if (fs.existsSync(attemptTranscriptPath)) {
+			const stat = fs.statSync(attemptTranscriptPath);
+			if (stat.size > MAX_TRANSCRIPT_ARTIFACT_BYTES) {
+				const fd = fs.openSync(attemptTranscriptPath, 'r');
+				try {
+					const buf = Buffer.alloc(MAX_TRANSCRIPT_ARTIFACT_BYTES);
+					const bytesRead = fs.readSync(fd, buf, 0, MAX_TRANSCRIPT_ARTIFACT_BYTES, stat.size - MAX_TRANSCRIPT_ARTIFACT_BYTES);
+					// NEW-3 fix: snap to nearest newline to avoid partial JSONL line.
+					const raw = buf.slice(0, bytesRead).toString('utf-8');
+					const firstNewline = raw.indexOf('\n');
+					transcriptContent = firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw;
+				} finally { fs.closeSync(fd); }
+			} else {
+				transcriptContent = fs.readFileSync(attemptTranscriptPath, 'utf-8');
+			}
 			transcriptArtifact = writeArtifact(manifest.artifactsRoot, {
 				kind: "log",
-				relativePath: `transcripts/${task.id}.jsonl`,
-				content: fs.readFileSync(transcriptPath, "utf-8"),
+				relativePath: `transcripts/${task.id}.attempt-${usedAttempt}.jsonl`,
+				content: transcriptContent,
 				producer: task.id,
 			});
 		}
@@ -328,13 +368,13 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 	}
 
 	// --- Yield-based completion contract ---
-	let yieldResult: YieldResult | undefined;
+	let _yieldResult: YieldResult | undefined;
 	const yieldEnabled = input.runtimeConfig?.yield?.enabled ?? DEFAULT_YIELD_CONFIG.enabled;
 	if (yieldEnabled && collectedJsonEvents.length > 0) {
 		if (hasYieldInOutput(collectedJsonEvents)) {
 			const yieldEvent = collectedJsonEvents.find((e) => isYieldEvent(e));
 			if (yieldEvent) {
-				yieldResult = extractYieldResult(yieldEvent);
+				_yieldResult = extractYieldResult(yieldEvent);
 			}
 		} else if (!error) {
 			appendEvent(manifest.eventsPath, { type: "task.attention", runId: manifest.runId, taskId: task.id, message: "Worker completed without calling submit_result tool.", data: { activityState: "needs_attention", reason: "no_yield" } });

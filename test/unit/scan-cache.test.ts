@@ -15,7 +15,7 @@ test("SharedScanCache stores and retrieves entries", () => {
 });
 
 test("SharedScanCache expires entries after TTL", () => {
-	let now = 0;
+	const now = 0;
 	const cache = new SharedScanCache({ ttlMs: 100, maxEntries: 10 });
 	cache.set("runs", { key: "run-1", path: "/tmp/run-1", raw: {}, mtimeMs: now, sizeBytes: 50, loadedAtMs: now });
 	// Override now for expiry simulation

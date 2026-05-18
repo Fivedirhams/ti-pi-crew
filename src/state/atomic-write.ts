@@ -114,6 +114,18 @@ export function atomicWriteFile(filePath: string, content: string): void {
 		try {
 			renameWithRetry(tempPath, filePath);
 		} catch (renameError) {
+			// H3 fix: re-check symlink safety before fallback.
+			// Between isSymlinkSafePath at top and rename attempt, the file
+			// could have been replaced with a symlink (TOCTOU). Refuse if so.
+			try {
+				const lstat = fs.lstatSync(filePath);
+				if (lstat.isSymbolicLink()) {
+					try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
+					throw renameError;
+				}
+			} catch {
+				// File might not exist yet — safe to proceed with fallback.
+			}
 			// Fallback: if rename fails (Windows EPERM/EBUSY), try direct write.
 			// This is less atomic but avoids data loss when concurrent writers contend.
 			try {

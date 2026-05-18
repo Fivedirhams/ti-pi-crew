@@ -39,7 +39,7 @@ function isRetryable(error: Error, policy: RetryPolicy): boolean {
 }
 
 export function calculateRetryDelay(attempt: number, policy: RetryPolicy = DEFAULT_RETRY_POLICY, random = Math.random): number {
-	const base = policy.backoffMs * Math.pow(policy.exponentialFactor, Math.max(0, attempt - 1));
+	const base = policy.backoffMs * policy.exponentialFactor ** Math.max(0, attempt - 1);
 	const jitter = (random() * 2 - 1) * policy.jitterRatio * base;
 	return Math.max(0, base + jitter);
 }

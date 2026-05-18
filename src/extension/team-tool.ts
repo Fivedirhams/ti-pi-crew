@@ -28,7 +28,7 @@ import type { PiTeamsToolResult } from "./tool-result.ts";
 import type { ArtifactDescriptor, TeamRunManifest, TeamTaskState } from "../state/types.ts";
 // Heavy runtime — lazy-loaded to avoid 1.4s import cost at extension registration.
 // executeTeamRun is only called when a team run actually executes.
-import { executeTeamRun as _executeTeamRunFn } from "../runtime/team-runner.ts";
+import type { executeTeamRun as _executeTeamRunFn } from "../runtime/team-runner.ts";
 type ExecuteTeamRunFn = typeof _executeTeamRunFn;
 let _cachedExecuteTeamRun: ExecuteTeamRunFn | undefined = undefined;
 async function executeTeamRun(...args: Parameters<ExecuteTeamRunFn>): Promise<Awaited<ReturnType<ExecuteTeamRunFn>>> {
@@ -52,7 +52,7 @@ import { autonomousPatchFromConfig, configPatchFromConfig, effectiveRunConfig, f
 import { handleApi } from "./team-tool/api.ts";
 // Lazy-loaded: run.ts pulls in spawnBackgroundTeamRun, resolveCrewRuntime, etc.
 // Static import fails silently in some jiti contexts (child-process), leaving handleRun undefined.
-import { handleRun as _handleRunFn } from "./team-tool/run.ts";
+import type { handleRun as _handleRunFn } from "./team-tool/run.ts";
 type HandleRunFn = typeof _handleRunFn;
 let _cachedHandleRun: HandleRunFn | undefined = undefined;
 async function handleRun(...args: Parameters<HandleRunFn>): Promise<Awaited<ReturnType<HandleRunFn>>> {
@@ -158,7 +158,7 @@ function artifactKey(artifact: ArtifactDescriptor): string {
 function recoverCheckpointedTasks(manifest: TeamRunManifest, tasks: TeamTaskState[]): { manifest: TeamRunManifest; tasks: TeamTaskState[]; recovered: string[] } {
 	const recovered: string[] = [];
 	let nextManifest = manifest;
-	let nextTasks = tasks.map((task) => {
+	const nextTasks = tasks.map((task) => {
 		if (task.status !== "running" || !task.checkpoint) return task;
 		if (task.checkpoint.phase === "artifact-written" && task.resultArtifact) {
 			recovered.push(task.id);

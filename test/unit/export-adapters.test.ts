@@ -33,7 +33,7 @@ test("claude adapter: formatFile includes YAML frontmatter with safe quoting", (
 	assert.match(output, /^---\n/);
 	assert.match(output, /description: "Explores codebases thoroughly"/);
 	assert.match(output, /category: "research"/);
-	assert.match(output, /tags:\n  - "explore"\n  - "audit"/);
+	assert.match(output, /tags:\n {2}- "explore"\n {2}- "audit"/);
 	assert.match(output, /# Explorer/);
 	assert.match(output, /You are an expert codebase explorer\./);
 });

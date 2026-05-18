@@ -127,8 +127,6 @@ export async function* readSseJson<T>(
 			const parsed: T = JSON.parse(evt.data) as T;
 			yield parsed;
 		} catch {
-			// Skip non-JSON SSE data events (e.g., ping, error messages, sentinels)
-			continue;
 		}
 	}
 }

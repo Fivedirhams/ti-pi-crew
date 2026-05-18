@@ -17,7 +17,7 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
 	/```[\s\S]*?```/g,                                    // fenced code blocks
 	/`[^`\n]+`/g,                                         // inline code
 	/\bhttps?:\/\/\S+/gi,                                 // URLs
-	/\b[\w.-]*[\/\\][\w.\/\\\-]+/g,                       // paths with / or \
+	/\b[\w.-]*[/\\][\w./\\-]+/g,                       // paths with / or \
 	/\b[A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)+\b/g,           // CONSTANT_CASE
 	/\b\w+(?:\.\w+)+\(\)/g,                               // dotted.method() calls
 	/[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)/g,                // function calls: name(args)

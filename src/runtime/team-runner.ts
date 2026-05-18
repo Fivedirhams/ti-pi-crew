@@ -101,7 +101,9 @@ function shouldMergeTaskUpdate(current: TeamTaskState, updated: TeamTaskState): 
 	return updated.status !== current.status || updated.finishedAt !== current.finishedAt || updated.startedAt !== current.startedAt || Boolean(updated.resultArtifact) || Boolean(updated.error) || Boolean(updated.modelAttempts?.length) || Boolean(updated.usage) || Boolean(updated.attempts?.length);
 }
 
-export function __test__mergeTaskUpdates(base: TeamTaskState[], results: Array<{ tasks: TeamTaskState[] }>): TeamTaskState[] {
+// H4 fix: rename to descriptive name. Kept __test__ as alias for backward
+// compat test imports.
+export function mergeTaskUpdatesPreservingTerminal(base: TeamTaskState[], results: Array<{ tasks: TeamTaskState[] }>): TeamTaskState[] {
 	let merged = base;
 	for (const result of results) {
 		for (const updated of result.tasks) {
@@ -112,6 +114,8 @@ export function __test__mergeTaskUpdates(base: TeamTaskState[], results: Array<{
 	}
 	return refreshTaskGraphQueues(merged);
 }
+/** @deprecated Use mergeTaskUpdatesPreservingTerminal. Kept for backward test import compat. */
+export const __test__mergeTaskUpdates = mergeTaskUpdatesPreservingTerminal;
 
 // 2.8: adaptive-plan parsing/repair/injection moved to src/runtime/adaptive-plan.ts.
 // Re-export the test-only helpers so existing test imports still resolve.
@@ -260,10 +264,10 @@ function dagReadyTaskIds(tasks: TeamTaskState[], completedIds: Set<string>): str
 }
 
 export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ manifest: TeamRunManifest; tasks: TeamTaskState[] }> {
-	let workflow = input.workflow;
+	const workflow = input.workflow;
 	let manifest = updateRunStatus(input.manifest, "running", input.executeWorkers ? "Executing team workflow." : "Creating workflow prompts and placeholder results.");
 
-	const runPromise = registerRunPromise(manifest.runId);
+	void registerRunPromise(manifest.runId);
 
 	const cleanupUsage = (): void => {
 		for (const task of input.tasks) clearTrackedTaskUsage(task.id);
