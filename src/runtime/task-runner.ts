@@ -10,6 +10,7 @@ import { createWorkerHeartbeat, touchWorkerHeartbeat } from "./worker-heartbeat.
 import type { WorkflowStep } from "../workflows/workflow-config.ts";
 import { captureWorktreeDiff, captureWorktreeDiffStat, prepareTaskWorkspace } from "../worktree/worktree-manager.ts";
 import { buildConfiguredModelRouting, formatModelAttemptNote, isRetryableModelFailure, type ModelAttemptSummary } from "./model-fallback.ts";
+import { tailReadWithLineSnap } from "./task-runner/tail-read.ts";
 import { parsePiJsonOutput, type ParsedPiJsonOutput } from "./pi-json-output.ts";
 import { runChildPi, type ChildPiLifecycleEvent } from "./child-pi.ts";
 import { buildTaskPacket } from "./task-packet.ts";
@@ -252,24 +253,7 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 			finalStderr = childResult.stderr;
 				// Cap transcript read to MAX_TRANSCRIPT_BYTES to avoid OOM on huge transcripts.
 			const MAX_TRANSCRIPT_PARSE_BYTES = 5 * 1024 * 1024;
-			let transcriptText = '';
-			if (fs.existsSync(transcriptPath)) {
-				const stat = fs.statSync(transcriptPath);
-				if (stat.size > MAX_TRANSCRIPT_PARSE_BYTES) {
-					const fd = fs.openSync(transcriptPath, 'r');
-					try {
-						const buf = Buffer.alloc(MAX_TRANSCRIPT_PARSE_BYTES);
-						const bytesRead = fs.readSync(fd, buf, 0, MAX_TRANSCRIPT_PARSE_BYTES, stat.size - MAX_TRANSCRIPT_PARSE_BYTES);
-						const raw = buf.slice(0, bytesRead).toString('utf-8');
-						const firstNewline = raw.indexOf('\n');
-						transcriptText = firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw;
-					} finally { fs.closeSync(fd); }
-				} else {
-					transcriptText = fs.readFileSync(transcriptPath, 'utf-8');
-				}
-			} else {
-				transcriptText = childResult.stdout;
-			}
+			const transcriptText = tailReadWithLineSnap(transcriptPath, MAX_TRANSCRIPT_PARSE_BYTES, childResult.stdout);
 			parsedOutput = parsePiJsonOutput(transcriptText);
 			error = childResult.error || (childResult.exitCode && childResult.exitCode !== 0 ? childResult.stderr || `Child Pi exited with ${childResult.exitCode}` : undefined);
 			persistHeartbeat(true);
@@ -314,22 +298,8 @@ export async function runTeamTask(input: TaskRunnerInput): Promise<{ manifest: T
 		// M2 fix: use attempt-relative path; cap content at MAX_TRANSCRIPT_ARTIFACT_BYTES.
 		const MAX_TRANSCRIPT_ARTIFACT_BYTES = 5 * 1024 * 1024; // 5MB cap
 		const attemptTranscriptPath = `${manifest.artifactsRoot}/transcripts/${task.id}.attempt-${usedAttempt}.jsonl`;
-		let transcriptContent = '';
-		if (fs.existsSync(attemptTranscriptPath)) {
-			const stat = fs.statSync(attemptTranscriptPath);
-			if (stat.size > MAX_TRANSCRIPT_ARTIFACT_BYTES) {
-				const fd = fs.openSync(attemptTranscriptPath, 'r');
-				try {
-					const buf = Buffer.alloc(MAX_TRANSCRIPT_ARTIFACT_BYTES);
-					const bytesRead = fs.readSync(fd, buf, 0, MAX_TRANSCRIPT_ARTIFACT_BYTES, stat.size - MAX_TRANSCRIPT_ARTIFACT_BYTES);
-					// NEW-3 fix: snap to nearest newline to avoid partial JSONL line.
-					const raw = buf.slice(0, bytesRead).toString('utf-8');
-					const firstNewline = raw.indexOf('\n');
-					transcriptContent = firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw;
-				} finally { fs.closeSync(fd); }
-			} else {
-				transcriptContent = fs.readFileSync(attemptTranscriptPath, 'utf-8');
-			}
+		const transcriptContent = tailReadWithLineSnap(attemptTranscriptPath, MAX_TRANSCRIPT_ARTIFACT_BYTES, "");
+		if (transcriptContent) {
 			transcriptArtifact = writeArtifact(manifest.artifactsRoot, {
 				kind: "log",
 				relativePath: `transcripts/${task.id}.attempt-${usedAttempt}.jsonl`,

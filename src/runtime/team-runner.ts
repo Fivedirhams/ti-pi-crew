@@ -545,7 +545,7 @@ async function executeTeamRunCore(
 		);
 		if (results.length === 0) break;
 		manifest = { ...results.at(-1)!.manifest, artifacts: mergeArtifacts([manifest.artifacts, ...results.map((item) => item.manifest.artifacts)].flat()) };
-		tasks = __test__mergeTaskUpdates(tasks, results);
+		tasks = mergeTaskUpdatesPreservingTerminal(tasks, results);
 
 		// Advance workflow phases whose tasks are all in terminal state
 		const terminalStatuses = new Set(["completed", "failed", "skipped", "cancelled"]);
