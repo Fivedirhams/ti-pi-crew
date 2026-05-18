@@ -117,11 +117,10 @@ export function atomicWriteFile(filePath: string, content: string): void {
 			// H3 fix: re-check symlink safety before fallback.
 			// Between isSymlinkSafePath at top and rename attempt, the file
 			// could have been replaced with a symlink (TOCTOU). Refuse if so.
-			let symlinkCheckFailed = false;
 			try {
 				const lstat = fs.lstatSync(filePath);
-					if (lstat.isSymbolicLink()) {
-				try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
+				if (lstat.isSymbolicLink()) {
+					try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
 					throw renameError;
 				}
 			} catch (checkError) {

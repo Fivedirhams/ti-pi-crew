@@ -177,8 +177,16 @@ export function getEventLogStats(eventsPath: string): EventLogStats | undefined 
 				fs.closeSync(fd);
 			}
 			const tailStr = tailBuf.toString("utf-8");
-			const lastNewline = tailStr.lastIndexOf("\n");
-			lastLine = lastNewline >= 0 ? tailStr.slice(lastNewline + 1).trim() : tailStr.trim();
+			// JSONL files end with "\n", so the last newline bounds an empty string.
+			// Walk backwards to find the last non-empty line.
+			let searchFrom = tailStr.length;
+			for (;;) {
+				const nl = tailStr.lastIndexOf("\n", searchFrom - 1);
+				if (nl < 0) { lastLine = tailStr.trim(); break; }
+				const candidate = tailStr.slice(nl + 1, searchFrom).trim();
+				if (candidate) { lastLine = candidate; break; }
+				searchFrom = nl;
+			}
 			try {
 				if (lastLine) {
 					newestTimestamp = (JSON.parse(lastLine) as { time: string }).time;
