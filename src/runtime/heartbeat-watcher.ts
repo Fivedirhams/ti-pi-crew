@@ -96,8 +96,23 @@ export class HeartbeatWatcher {
 				activeKeys.add(key);
 				this.lastSeen.set(key, now);
 
-				const elapsed = heartbeatAgeMs(task.heartbeat, now);
-				const level = classifyHeartbeat(task.heartbeat, thresholds, now);
+				// Check heartbeat staleness with lastActivityAt fallback
+				let elapsed = heartbeatAgeMs(task.heartbeat, now);
+				// PR #6 partial: use lastActivityAt as fallback when heartbeat is stale
+				// If heartbeat is stale but lastActivityAt is fresher, use activity age instead.
+				// This prevents false-positive dead detection for live-session tasks during long operations.
+				if (task.agentProgress?.lastActivityAt) {
+					const activityAt = new Date(task.agentProgress.lastActivityAt).getTime();
+					if (Number.isFinite(activityAt)) {
+						const activityAge = now - activityAt;
+						// Use activity age if it's fresher than heartbeat age
+						// (no upper bound - if agent has recent activity, trust it even if old)
+						if (activityAge < elapsed) {
+							elapsed = activityAge;
+						}
+					}
+				}
+				const level = elapsed > thresholds.deadMs ? "dead" : elapsed > thresholds.staleMs ? "stale" : elapsed > thresholds.warnMs ? "warn" : "healthy";
 				this.opts.registry.gauge("crew.heartbeat.staleness_ms", "Heartbeat elapsed since last seen, milliseconds").set({ runId: run.runId, taskId: task.id }, Number.isFinite(elapsed) ? elapsed : thresholds.deadMs);
 				this.opts.registry.counter("crew.heartbeat.level_total", "Heartbeat classifications by level").inc({ runId: run.runId, level });
 				const previous = this.lastLevel.get(key);
