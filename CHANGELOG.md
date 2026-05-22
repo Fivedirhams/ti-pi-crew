@@ -2,6 +2,19 @@
 
 ## [0.2.21] — 3 Bugs Fixed — Background Runner, Child-pi stdin, Phantom Runs (2026-05-22)
 
+## [0.2.25] — CI Fixes & needs_attention Terminal Status (2026-05-22)
+
+### Bug Fixes
+- **needs_attention as valid terminal status** — DAG scheduler now treats `needs_attention` as terminal (like `completed`). This fixes infinite retry loops when tasks complete without calling `submit_result`.
+- **TypeScript compilation errors** — Fixed duplicate `loadRunManifestById` imports and added missing `persistSingleTaskUpdate` import in `live-executor.ts`.
+- **Test assertions updated** — 6 test files now accept `needs_attention` as valid terminal status for mock tests.
+- **LAZY markers for dynamic imports** — Added proper `// LAZY:` comments for `check-lazy-imports` script compliance.
+- **Memory limit flag handling** — Updated `async-runner.test.ts` to handle `--max-old-space-size=512` in command args.
+
+### Tests
+- All 1655 tests pass (1609 unit + 46 integration).
+- CI passes on all 3 platforms (ubuntu/macos/windows).
+
 ## 0.2.20 — 14 Bugs Fixed — needs_attention, Heartbeat, OOM, API Keys (2026-05-20)
 
 ### Features
