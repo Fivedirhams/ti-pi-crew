@@ -71,12 +71,17 @@ export async function resolveCrewRuntime(config: PiTeamsConfig, env: NodeJS.Proc
 	if (requestedMode === "child-process") return childCaps(requestedMode);
 	// When a child-process mock is active (tests), force auto-mode to child-process where the mock is active.
 	if (requestedMode === "auto" && env.PI_TEAMS_MOCK_CHILD_PI) return childCaps(requestedMode, "PI_TEAMS_MOCK_CHILD_PI mock forces child-process runtime in auto mode.");
-	if (requestedMode === "live-session" || requestedMode === "auto") {
+	if (requestedMode === "live-session") {
 		const live = await isLiveSessionRuntimeAvailable(1500, env);
 		if (live.available) return liveCaps(requestedMode);
-		if (requestedMode === "live-session" && config.runtime?.allowChildProcessFallback === false)
+		if (config.runtime?.allowChildProcessFallback === false)
 			return scaffoldCaps(requestedMode, live.reason, "blocked");
 		return { ...childCaps(requestedMode), fallback: "child-process", reason: live.reason };
+	}
+	// auto mode: use child-process unless preferLiveSession is explicitly enabled
+	if (requestedMode === "auto" && config.runtime?.preferLiveSession === true) {
+		const live = await isLiveSessionRuntimeAvailable(1500, env);
+		if (live.available) return liveCaps(requestedMode);
 	}
 	return childCaps(requestedMode);
 }

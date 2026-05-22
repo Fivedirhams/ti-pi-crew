@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AgentConfig } from "../../agents/agent-config.ts";
 import type { CrewRuntimeConfig } from "../../config/config.ts";
 import { writeArtifact } from "../../state/artifact-store.ts";
@@ -7,6 +8,7 @@ import { loadRunManifestById } from "../../state/state-store.ts";
 import type { ArtifactDescriptor, TeamRunManifest, TeamTaskState } from "../../state/types.ts";
 import type { WorkflowStep } from "../../workflows/workflow-config.ts";
 import { appendCrewAgentEvent, appendCrewAgentOutput, emptyCrewAgentProgress, recordFromTask, upsertCrewAgent } from "../crew-agent-records.ts";
+import { createWorkerHeartbeat, touchWorkerHeartbeat } from "../worker-heartbeat.ts";
 import { createStartupEvidence, type WorkerStartupEvidence } from "../worker-startup.ts";
 import { runLiveSessionTask } from "../live-session-runtime.ts";
 import { shouldAppendProgressEventUpdate, type ProgressEventSummary } from "../progress-event-coalescer.ts";
@@ -64,6 +66,7 @@ export async function runLiveTask(input: RunLiveTaskInput): Promise<RunLiveTaskO
 	});
 	let lastAgentRecordPersistedAt = 0;
 	let lastRunProgressPersistedAt = 0;
+	let lastHeartbeatPersistedAt = 0;
 	let lastRunProgressSummary: ProgressEventSummary | undefined;
 	const persistLiveProgress = (event: unknown, force = false): void => {
 		if (!isCurrent()) return;
@@ -71,6 +74,18 @@ export async function runLiveTask(input: RunLiveTaskInput): Promise<RunLiveTaskO
 		if (force || shouldFlushProgressEvent(event) || now - lastAgentRecordPersistedAt >= 500) {
 			upsertCrewAgent(manifest, recordFromTask(manifest, task, "live-session"));
 			lastAgentRecordPersistedAt = now;
+		}
+		// Bug #5 fix: also persist heartbeat to tasks.json so heartbeat-watcher can detect live-session activity
+		if (force || now - lastHeartbeatPersistedAt >= 1000) {
+			task = {
+				...task,
+				heartbeat: touchWorkerHeartbeat(task.heartbeat ?? createWorkerHeartbeat(task.id)),
+			};
+			tasks = updateTask(tasks, task);
+			// Persist to tasks.json using the same pattern as task-runner.ts
+			const tasksPath = path.join(manifest.stateRoot, "tasks.json");
+			try { fs.writeFileSync(tasksPath, JSON.stringify({ ...loaded, tasks }, null, 2)); } catch {}
+			lastHeartbeatPersistedAt = now;
 		}
 		const summary = progressEventSummary(task, event);
 		const decision = shouldAppendProgressEventUpdate({ previous: lastRunProgressSummary, next: summary, nowMs: now, lastAppendMs: lastRunProgressPersistedAt || undefined, minIntervalMs: 1000, force });
