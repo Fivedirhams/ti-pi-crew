@@ -1,1 +1,23 @@
-[]
+[
+  {
+    "runId": "team_20260522054127_a2890a5a61bd3f89",
+    "cwd": "/tmp/pi-crew-agent-files-lrlwz7",
+    "stateRoot": "/tmp/pi-crew-agent-files-lrlwz7/.crew/state/runs/team_20260522054127_a2890a5a61bd3f89",
+    "manifestPath": "/tmp/pi-crew-agent-files-lrlwz7/.crew/state/runs/team_20260522054127_a2890a5a61bd3f89/manifest.json",
+    "updatedAt": "2026-05-22T05:41:27.938Z"
+  },
+  {
+    "runId": "team_20260522052046_0f7631d98e86d72e",
+    "cwd": "/tmp/pi-crew-lazy-agents-nOwtlV",
+    "stateRoot": "/tmp/pi-crew-lazy-agents-nOwtlV/.crew/state/runs/team_20260522052046_0f7631d98e86d72e",
+    "manifestPath": "/tmp/pi-crew-lazy-agents-nOwtlV/.crew/state/runs/team_20260522052046_0f7631d98e86d72e/manifest.json",
+    "updatedAt": "2026-05-22T05:20:46.882Z"
+  },
+  {
+    "runId": "team_20260522052021_b8df83203d40e769",
+    "cwd": "/tmp/pi-crew-agent-files-q1eofd",
+    "stateRoot": "/tmp/pi-crew-agent-files-q1eofd/.crew/state/runs/team_20260522052021_b8df83203d40e769",
+    "manifestPath": "/tmp/pi-crew-agent-files-q1eofd/.crew/state/runs/team_20260522052021_b8df83203d40e769/manifest.json",
+    "updatedAt": "2026-05-22T05:20:21.747Z"
+  }
+]

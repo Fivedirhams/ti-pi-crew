@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import type { AgentConfig } from "../../agents/agent-config.ts";
 import type { CrewRuntimeConfig } from "../../config/config.ts";
 import { writeArtifact } from "../../state/artifact-store.ts";
@@ -9,6 +8,7 @@ import type { ArtifactDescriptor, TeamRunManifest, TeamTaskState } from "../../s
 import type { WorkflowStep } from "../../workflows/workflow-config.ts";
 import { appendCrewAgentEvent, appendCrewAgentOutput, emptyCrewAgentProgress, recordFromTask, upsertCrewAgent } from "../crew-agent-records.ts";
 import { createWorkerHeartbeat, touchWorkerHeartbeat } from "../worker-heartbeat.ts";
+import { loadRunManifestById, saveRunTasks } from "../../state/state-store.ts";
 import { createStartupEvidence, type WorkerStartupEvidence } from "../worker-startup.ts";
 import { runLiveSessionTask } from "../live-session-runtime.ts";
 import { shouldAppendProgressEventUpdate, type ProgressEventSummary } from "../progress-event-coalescer.ts";
@@ -81,10 +81,7 @@ export async function runLiveTask(input: RunLiveTaskInput): Promise<RunLiveTaskO
 				...task,
 				heartbeat: touchWorkerHeartbeat(task.heartbeat ?? createWorkerHeartbeat(task.id)),
 			};
-			tasks = updateTask(tasks, task);
-			// Persist to tasks.json using the same pattern as task-runner.ts
-			const tasksPath = path.join(manifest.stateRoot, "tasks.json");
-			try { fs.writeFileSync(tasksPath, JSON.stringify({ ...loaded, tasks }, null, 2)); } catch {}
+			tasks = persistSingleTaskUpdate(manifest, tasks, task);
 			lastHeartbeatPersistedAt = now;
 		}
 		const summary = progressEventSummary(task, event);
