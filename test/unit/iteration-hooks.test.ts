@@ -31,6 +31,15 @@ function makePayload(overrides: Partial<HookPayload> = {}): HookPayload {
 }
 
 describe("isAllowedHookPath", () => {
+	// DEBUG
+	it("DEBUG isAbsolute and normalize", () => {
+		console.log("path.sep:", JSON.stringify(require("node:path").sep));
+		console.log("path.isAbsolute('.hooks/hook.sh'):", require("node:path").isAbsolute(".hooks/hook.sh"));
+		console.log("path.normalize('.hooks/hook.sh'):", JSON.stringify(require("node:path").normalize(".hooks/hook.sh")));
+		const norm = require("node:path").normalize(".hooks/hook.sh");
+		console.log("startsWith check:", norm.startsWith(".hooks/"));
+		assert.equal(norm.startsWith(".hooks/"), true);
+	});
 	it("rejects empty paths", () => {
 		assert.equal(isAllowedHookPath(""), false);
 		assert.equal(isAllowedHookPath("   "), false);
