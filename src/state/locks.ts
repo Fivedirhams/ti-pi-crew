@@ -113,6 +113,25 @@ async function acquireLockWithRetryAsync(filePath: string, staleMs: number): Pro
 	}
 }
 
+/**
+ * General-purpose file lock for arbitrary file paths.
+ * Uses the same O_EXCL atomic create strategy as run locks.
+ */
+export function withFileLockSync<T>(filePath: string, fn: () => T, options: RunLockOptions = {}): T {
+	const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	acquireLockWithRetry(filePath, staleMs);
+	try {
+		return fn();
+	} finally {
+		try {
+			fs.rmSync(filePath, { force: true });
+		} catch {
+			// Best-effort lock cleanup.
+		}
+	}
+}
+
 export function withRunLockSync<T>(manifest: TeamRunManifest, fn: () => T, options: RunLockOptions = {}): T {
 	const filePath = lockPath(manifest);
 	const staleMs = options.staleMs ?? DEFAULT_STALE_MS;

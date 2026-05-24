@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { PiTeamsAutonomyProfileSchema, PiTeamsConfigSchema } from "../schema/config-schema.ts";
 import { suggestConfigKey } from "./suggestions.ts";
 import { projectCrewRoot, projectPiRoot } from "../utils/paths.ts";
+import { withFileLockSync } from "../state/locks.ts";
 
 // 2.9: interface types extracted to ./types.ts; re-export for back-compat.
 export type {
@@ -703,38 +704,44 @@ export function loadConfig(cwd?: string): LoadedPiTeamsConfig {
 
 export function updateConfig(patch: PiTeamsConfig, options: UpdateConfigOptions = {}): SavedPiTeamsConfig {
 	const filePath = options.scope === "project" && options.cwd ? projectConfigPath(options.cwd) : configPath();
-	let current: Record<string, unknown>;
-	try {
-		current = readConfigRecord(filePath);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Could not update pi-crew config: ${message}`);
-	}
-	let merged = mergeConfig(parseConfig(current), patch);
-	if (options.unsetPaths?.length) {
-		const raw = JSON.parse(JSON.stringify(merged)) as Record<string, unknown>;
-		for (const unset of options.unsetPaths) unsetPath(raw, unset);
-		merged = parseConfig(raw);
-	}
-	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-	fs.writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, "utf-8");
-	return { path: filePath, config: merged };
+	const lockPath = filePath + ".lock";
+	return withFileLockSync(lockPath, () => {
+		let current: Record<string, unknown>;
+		try {
+			current = readConfigRecord(filePath);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(`Could not update pi-crew config: ${message}`);
+		}
+		let merged = mergeConfig(parseConfig(current), patch);
+		if (options.unsetPaths?.length) {
+			const raw = JSON.parse(JSON.stringify(merged)) as Record<string, unknown>;
+			for (const unset of options.unsetPaths) unsetPath(raw, unset);
+			merged = parseConfig(raw);
+		}
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		fs.writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, "utf-8");
+		return { path: filePath, config: merged };
+	});
 }
 
 export function updateAutonomousConfig(patch: PiTeamsAutonomousConfig): SavedPiTeamsConfig {
 	const filePath = configPath();
-	let current: Record<string, unknown>;
-	try {
-		current = readConfigRecord(filePath);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Could not update pi-crew config: ${message}`);
-	}
-	const currentAutonomous = current.autonomous && typeof current.autonomous === "object" && !Array.isArray(current.autonomous)
-		? current.autonomous as Record<string, unknown>
-		: {};
-	current.autonomous = { ...currentAutonomous, ...patch };
-	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-	fs.writeFileSync(filePath, `${JSON.stringify(current, null, 2)}\n`, "utf-8");
-	return { path: filePath, config: parseConfig(current) };
+	const lockPath = filePath + ".lock";
+	return withFileLockSync(lockPath, () => {
+		let current: Record<string, unknown>;
+		try {
+			current = readConfigRecord(filePath);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(`Could not update pi-crew config: ${message}`);
+		}
+		const currentAutonomous = current.autonomous && typeof current.autonomous === "object" && !Array.isArray(current.autonomous)
+			? current.autonomous as Record<string, unknown>
+			: {};
+		current.autonomous = { ...currentAutonomous, ...patch };
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		fs.writeFileSync(filePath, `${JSON.stringify(current, null, 2)}\n`, "utf-8");
+		return { path: filePath, config: parseConfig(current) };
+	});
 }

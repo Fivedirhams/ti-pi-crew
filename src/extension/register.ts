@@ -566,7 +566,12 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 		notifyActiveRuns(ctx);
 
 		// Auto-cancel orphaned runs from dead sessions
-		const currentSessionId = (typeof ctx === "object" && ctx !== null && "sessionId" in ctx ? (ctx as Record<string, unknown>).sessionId : undefined) as string | undefined;
+		// Extract sessionId from context — validate runtime type instead of unsafe cast.
+		const rawSessionId = typeof ctx === "object" && ctx !== null && "sessionId" in ctx ? (ctx as Record<string, unknown>).sessionId : undefined;
+		const currentSessionId = typeof rawSessionId === "string" && rawSessionId.length > 0 ? rawSessionId : undefined;
+		if (rawSessionId !== undefined && currentSessionId === undefined) {
+			logInternalError("register.sessionId.invalid", new Error(`Invalid session ID: expected non-empty string, got ${typeof rawSessionId}`));
+		}
 
 		// Defer ALL heavy cleanup to after the session_start handler returns.
 		// These operations involve synchronous directory scanning (readdirSync, readFileSync)
