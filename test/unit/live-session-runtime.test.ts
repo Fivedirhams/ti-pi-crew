@@ -1,15 +1,22 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import test from "node:test";
 import { handleTeamTool } from "../../src/extension/team-tool.ts";
-import { clearLiveAgentsForTest, listLiveAgents } from "../../src/runtime/live-agent-manager.ts";
+import {
+	clearLiveAgentsForTest,
+	listLiveAgents,
+} from "../../src/runtime/live-agent-manager.ts";
 import { runLiveSessionTask } from "../../src/runtime/live-session-runtime.ts";
 import { runLiveTask } from "../../src/runtime/task-runner/live-executor.ts";
 import { createRunManifest } from "../../src/state/state-store.ts";
 import type { TeamConfig } from "../../src/teams/team-config.ts";
 import type { WorkflowConfig } from "../../src/workflows/workflow-config.ts";
+import {
+	createTrackedTempDir,
+	removeTrackedTempDir,
+} from "../fixtures/test-tempdir.ts";
 import { firstText } from "../fixtures/tool-result-helpers.ts";
 
 function restoreEnv(name: string, previous: string | undefined): void {
@@ -38,15 +45,30 @@ test.afterEach(() => clearLiveAgentsForTest());
 test("mock live-session suppresses owner callbacks when stale", async () => {
 	const previousMock = process.env.PI_CREW_MOCK_LIVE_SESSION;
 	process.env.PI_CREW_MOCK_LIVE_SESSION = "success";
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-live-session-stale-"));
+	const cwd = createTrackedTempDir("pi-crew-live-session-stale-");
 	const events: unknown[] = [];
 	const outputs: string[] = [];
 	try {
 		const result = await runLiveSessionTask({
-			manifest: { runId: "run_stale", stateRoot: path.join(cwd, ".crew", "state", "runs", "run_stale") } as never,
+			manifest: {
+				runId: "run_stale",
+				stateRoot: path.join(
+					cwd,
+					".crew",
+					"state",
+					"runs",
+					"run_stale",
+				),
+			} as never,
 			task: { id: "task_stale", role: "executor", cwd } as never,
 			step: { id: "execute", role: "executor", task: "do" } as never,
-			agent: { name: "executor", description: "Executor", source: "builtin", filePath: "executor.md", systemPrompt: "Do it" },
+			agent: {
+				name: "executor",
+				description: "Executor",
+				source: "builtin",
+				filePath: "executor.md",
+				systemPrompt: "Do it",
+			},
 			prompt: "do it",
 			workspaceId: cwd,
 			onEvent: (event) => events.push(event),
@@ -58,24 +80,35 @@ test("mock live-session suppresses owner callbacks when stale", async () => {
 		assert.equal(outputs.length, 0);
 	} finally {
 		restoreEnv("PI_CREW_MOCK_LIVE_SESSION", previousMock);
-		fs.rmSync(cwd, { recursive: true, force: true });
+		removeTrackedTempDir(cwd);
 	}
 });
 
 test("live task production path passes stale owner guard", async () => {
 	const previousMock = process.env.PI_CREW_MOCK_LIVE_SESSION;
 	process.env.PI_CREW_MOCK_LIVE_SESSION = "success";
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-live-task-stale-"));
+	const cwd = createTrackedTempDir("pi-crew-live-task-stale-");
 	try {
 		fs.mkdirSync(path.join(cwd, ".crew"), { recursive: true });
-		const { manifest, tasks } = createRunManifest({ cwd, team, workflow, goal: "stale live task" });
+		const { manifest, tasks } = createRunManifest({
+			cwd,
+			team,
+			workflow,
+			goal: "stale live task",
+		});
 		const task = { ...tasks[0]!, startedAt: new Date().toISOString() };
 		const result = await runLiveTask({
 			manifest,
 			tasks: [task],
 			task,
 			step: { id: "execute", role: "executor", task: "do" },
-			agent: { name: "executor", description: "Executor", source: "builtin", filePath: "executor.md", systemPrompt: "Do it" },
+			agent: {
+				name: "executor",
+				description: "Executor",
+				source: "builtin",
+				filePath: "executor.md",
+				systemPrompt: "Do it",
+			},
 			prompt: "do it",
 			workspaceId: cwd,
 			isCurrent: () => false,
@@ -84,20 +117,35 @@ test("live task production path passes stale owner guard", async () => {
 		assert.equal(result.task.agentProgress, undefined);
 	} finally {
 		restoreEnv("PI_CREW_MOCK_LIVE_SESSION", previousMock);
-		fs.rmSync(cwd, { recursive: true, force: true });
+		removeTrackedTempDir(cwd);
 	}
 });
 
 test("mock live-session keeps terminal live agents for resume but excludes them from active API", async () => {
 	const previousMock = process.env.PI_CREW_MOCK_LIVE_SESSION;
 	process.env.PI_CREW_MOCK_LIVE_SESSION = "success";
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-live-session-cleanup-"));
+	const cwd = createTrackedTempDir("pi-crew-live-session-cleanup-");
 	try {
 		const result = await runLiveSessionTask({
-			manifest: { runId: "run_cleanup", stateRoot: path.join(cwd, ".crew", "state", "runs", "run_cleanup") } as never,
+			manifest: {
+				runId: "run_cleanup",
+				stateRoot: path.join(
+					cwd,
+					".crew",
+					"state",
+					"runs",
+					"run_cleanup",
+				),
+			} as never,
 			task: { id: "task_cleanup", role: "executor", cwd } as never,
 			step: { id: "execute", role: "executor", task: "do" } as never,
-			agent: { name: "executor", description: "Executor", source: "builtin", filePath: "executor.md", systemPrompt: "Do it" },
+			agent: {
+				name: "executor",
+				description: "Executor",
+				source: "builtin",
+				filePath: "executor.md",
+				systemPrompt: "Do it",
+			},
 			prompt: "do it",
 			workspaceId: cwd,
 		});
@@ -106,7 +154,7 @@ test("mock live-session keeps terminal live agents for resume but excludes them 
 		assert.equal(listLiveAgents()[0]?.status, "completed");
 	} finally {
 		restoreEnv("PI_CREW_MOCK_LIVE_SESSION", previousMock);
-		fs.rmSync(cwd, { recursive: true, force: true });
+		removeTrackedTempDir(cwd);
 	}
 });
 
@@ -115,27 +163,65 @@ test("run can use experimental live-session runtime with durable transcript hook
 	const previousMock = process.env.PI_CREW_MOCK_LIVE_SESSION;
 	process.env.PI_CREW_ENABLE_EXPERIMENTAL_LIVE_SESSION = "1";
 	process.env.PI_CREW_MOCK_LIVE_SESSION = "success";
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-live-session-"));
+	const cwd = createTrackedTempDir("pi-crew-live-session-");
 	try {
 		fs.mkdirSync(path.join(cwd, ".crew"), { recursive: true });
-		const run = await handleTeamTool({ action: "run", team: "fast-fix", goal: "live session smoke", config: { runtime: { mode: "live-session" } } }, { cwd });
+		const run = await handleTeamTool(
+			{
+				action: "run",
+				team: "fast-fix",
+				goal: "live session smoke",
+				config: { runtime: { mode: "live-session" } },
+			},
+			{ cwd },
+		);
 		assert.equal(run.isError, false);
-		assert.match(firstText(run), /Experimental live-session worker execution was enabled/);
+		assert.match(
+			firstText(run),
+			/Experimental live-session worker execution was enabled/,
+		);
 		const runId = run.details.runId!;
-		const agentsResult = await handleTeamTool({ action: "api", runId, config: { operation: "list-agents" } }, { cwd });
+		const agentsResult = await handleTeamTool(
+			{ action: "api", runId, config: { operation: "list-agents" } },
+			{ cwd },
+		);
 		const agents = JSON.parse(firstText(agentsResult));
 		assert.equal(agents[0].runtime, "live-session");
 		assert.equal(agents[0].status, "completed");
-		const transcript = await handleTeamTool({ action: "api", runId, config: { operation: "read-agent-transcript", agentId: agents[0].taskId } }, { cwd });
+		const transcript = await handleTeamTool(
+			{
+				action: "api",
+				runId,
+				config: {
+					operation: "read-agent-transcript",
+					agentId: agents[0].taskId,
+				},
+			},
+			{ cwd },
+		);
 		assert.match(firstText(transcript), /Mock live-session success/);
-		const liveAgents = await handleTeamTool({ action: "api", runId, config: { operation: "list-live-agents" } }, { cwd });
+		const liveAgents = await handleTeamTool(
+			{ action: "api", runId, config: { operation: "list-live-agents" } },
+			{ cwd },
+		);
 		assert.equal(firstText(liveAgents), "[]");
-		const sidechainPath = path.join(cwd, ".crew", "state", "runs", runId, "agents", agents[0].taskId, "sidechain.output.jsonl");
-		assert.match(fs.readFileSync(sidechainPath, "utf-8"), /"isSidechain":true/);
+		const sidechainPath = path.join(
+			cwd,
+			".crew",
+			"state",
+			"runs",
+			runId,
+			"agents",
+			agents[0].taskId,
+			"sidechain.output.jsonl",
+		);
+		assert.match(
+			fs.readFileSync(sidechainPath, "utf-8"),
+			/"isSidechain":true/,
+		);
 	} finally {
 		restoreEnv("PI_CREW_ENABLE_EXPERIMENTAL_LIVE_SESSION", previousEnable);
 		restoreEnv("PI_CREW_MOCK_LIVE_SESSION", previousMock);
-		fs.rmSync(cwd, { recursive: true, force: true });
+		removeTrackedTempDir(cwd);
 	}
 });
-

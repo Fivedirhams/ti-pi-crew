@@ -1,0 +1,46 @@
+/**
+ * test-tempdir.ts — Auto-cleanup for test temporary directories.
+ *
+ * When tests timeout or crash, `finally {}` blocks don't run, leaving
+ * orphaned /tmp/pi-crew-* directories with "running" manifests that
+ * confuse the TUI dashboard.
+ *
+ * This module tracks all created temp dirs and cleans them up via
+ * `test.after()`, which runs even after timeouts.
+ */
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import test from "node:test";
+
+const tracked = new Set<string>();
+
+/** Create a temp dir that will be auto-cleaned after all tests. */
+export function createTrackedTempDir(prefix: string): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	tracked.add(dir);
+	return dir;
+}
+
+/** Clean up a tracked dir immediately (e.g. in finally block). */
+export function removeTrackedTempDir(dir: string): void {
+	try {
+		fs.rmSync(dir, { recursive: true, force: true });
+	} catch {
+		/* best effort */
+	}
+	tracked.delete(dir);
+}
+
+// Global cleanup: runs after ALL tests in the process, even on timeout.
+test.after(() => {
+	for (const dir of tracked) {
+		try {
+			fs.rmSync(dir, { recursive: true, force: true });
+		} catch {
+			/* best effort */
+		}
+	}
+	tracked.clear();
+});

@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { TeamRunManifest, TeamTaskState } from "../state/types.ts";
 import { recordFromTask, upsertCrewAgent } from "./crew-agent-records.ts";
@@ -343,4 +344,107 @@ export function reconcileStaleRun(
 		detail: `PID ${pid}: ${pidStatus.detail}; ${staleness.reason}; repaired ${repaired.filter((t) => t.status === "cancelled").length} tasks`,
 		repairedTasks: repaired,
 	};
+}
+
+/**
+ * Scan /tmp (os.tmpdir()) for orphaned pi-crew-* workspaces and reconcile
+ * any stale runs found. This catches runs created by tests or crashed sessions
+ * that the per-CWD auto-repair timer would miss.
+ *
+ * @returns Number of runs repaired.
+ */
+export function reconcileOrphanedTempWorkspaces(now = Date.now()): number {
+	const tmpDir = getSafeTempDir();
+	if (!tmpDir) return 0;
+	let repaired = 0;
+	try {
+		const entries = fs.readdirSync(tmpDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !entry.name.startsWith("pi-crew-"))
+				continue;
+			const workspaceDir = path.join(tmpDir, entry.name);
+			const crewDir = path.join(workspaceDir, ".crew");
+			if (!fs.existsSync(crewDir)) continue;
+			const stateRunsDir = path.join(crewDir, "state", "runs");
+			if (!fs.existsSync(stateRunsDir)) continue;
+			try {
+				for (const runDir of fs.readdirSync(stateRunsDir)) {
+					const manifestPath = path.join(
+						stateRunsDir,
+						runDir,
+						"manifest.json",
+					);
+					const tasksPath = path.join(
+						stateRunsDir,
+						runDir,
+						"tasks.json",
+					);
+					if (
+						!fs.existsSync(manifestPath) ||
+						!fs.existsSync(tasksPath)
+					)
+						continue;
+					try {
+						const manifest: TeamRunManifest = JSON.parse(
+							fs.readFileSync(manifestPath, "utf-8"),
+						);
+						if (manifest.status !== "running") continue;
+						const tasks: TeamTaskState[] = JSON.parse(
+							fs.readFileSync(tasksPath, "utf-8"),
+						);
+						const result = reconcileStaleRun(manifest, tasks, now);
+						if (result.repaired && result.repairedTasks) {
+							// Persist repaired tasks
+							fs.writeFileSync(
+								tasksPath,
+								JSON.stringify(result.repairedTasks, null, 2),
+							);
+							// Update manifest status
+							const updated = {
+								...manifest,
+								status: "cancelled" as const,
+								updatedAt: new Date(now).toISOString(),
+								summary: `Stale run reconciled: ${result.detail}`,
+							};
+							fs.writeFileSync(
+								manifestPath,
+								JSON.stringify(updated, null, 2),
+							);
+							// Update agent records
+							for (const task of result.repairedTasks) {
+								try {
+									upsertCrewAgent(
+										updated,
+										recordFromTask(
+											updated,
+											task,
+											"scaffold",
+										),
+									);
+								} catch {
+									/* non-critical */
+								}
+							}
+							repaired++;
+						}
+					} catch {
+						/* skip corrupt manifests */
+					}
+				}
+			} catch {
+				/* skip unreadable dirs */
+			}
+		}
+	} catch {
+		/* skip if tmpdir unreadable */
+	}
+	return repaired;
+}
+
+function getSafeTempDir(): string | undefined {
+	try {
+		return fs.existsSync(os.tmpdir()) ? os.tmpdir() : undefined;
+	} catch {
+		return undefined;
+	}
 }
