@@ -92,84 +92,28 @@ Minor language refinement (`"Use the read tool to load"` → `"Read the full ski
 
 ## 4. Opportunities for pi-crew Enhancement
 
-### A. AgentHarness Lifecycle Integration
+> **Full implementation plans with code examples:** [`docs/pi-mono-opportunities.md`](./pi-mono-opportunities.md)
 
-pi-crew currently uses `pi.on("before_agent_start")` to rewrite prompts. With harness maturity, consider adding harness-level `before_provider_request` hooks that can modify stream options per-task.
+**Priority 1 (HIGH):** BM25 Semantic Reranking — integrate existing BM25 search into `team action='recommend'` to fix keyword-matching failures for nuanced goals.
 
-**Example use case:** Per-task API key rotation, per-task timeout override based on task complexity.
+**Priority 2 (MEDIUM):** Extended Hook Phases — add `before_turn` / `after_turn` hooks using existing `turn_end` event tracking in `child-pi.ts`.
 
-### B. Extended Hook Phases
+**Priority 3 (MEDIUM):** Hook Lifecycle Tests — expand test coverage for `task_result`, `before_retry`, `before_publish`, `session_before_switch`, `run_recovery` hooks.
 
-Current pi-crew hooks: `before_run_start`, `before_task_start`, `task_result`, `before_cancel`, `before_retry`, `before_forget`, `before_cleanup`, `before_publish`, `session_before_switch`, `run_recovery`.
+**Priority 4 (LOW):** Phase Tracking + Hook Documentation — task phase states and `docs/hooks.md` developer guide.
 
-**Potential additions from harness alignment:**
-- `before_turn` / `after_turn` — for per-turn observability or early abort
-- `before_compaction` / `after_compaction` — for transcript management hooks
-- `on_model_switch` — triggered when model changes mid-run (future)
-
-### C. ExecutionEnv Reference
-
-pi-mono's harness uses `ExecutionEnv` for sandboxed filesystem operations (read, write, exec, ls, stat, tree). pi-crew uses direct `fs` calls + `safe-bash.ts`. 
-
-**Not a priority to align** — pi-crew's approach is correct for its trust model (team-run workers have full filesystem access; `safe-bash.ts` handles filtering).
-
-### D. Harness Event Architecture
-
-pi-mono uses:
-- `listeners` — synchronous event subscription (any event)
-- `hooks` — per-type async handlers with result chaining (`before_provider_request`, etc.)
-
-pi-crew's `HookExecutionReport` is simpler (one-shot, no result chaining).
-
-**Low priority:** Consider hook result chaining for `before_provider_request` style hooks if pi-crew adds stream-level interception.
-
-### E. BM25 Search Enhancement
-
-pi-crew recently added BM25 search (`src/utils/bm25-search.ts`). pi-mono has no equivalent — pi-crew is ahead here.
-
-**Opportunity:** Add BM25 reranking to `team action='recommend'` for smarter agent/team selection based on goal semantics.
+**Not a priority:** ExecutionEnv alignment, harness event chaining — pi-crew's approach is appropriate for its trust model.
 
 ---
 
 ## 5. Development Support Suggestions
 
-### A. Add Harness-Style Phase Tracking to pi-crew
+> **See [`docs/pi-mono-opportunities.md`](./pi-mono-opportunities.md) for detailed test plans and documentation outlines.**
 
-For better observability, consider adding task-level phase tracking to dashboard/logs:
-
-```ts
-type TaskPhase = "pending" | "exploring" | "planning" | "executing" | "verifying" | "finalizing" | "done";
-```
-
-This would make `team action='status'` richer without changing execution semantics.
-
-### B. Test Harness Parity for Hooks
-
-pi-mono has 150+ harness tests covering lifecycle, stream options, hooks. pi-crew has basic hook tests in `test/unit/task-packet-sanitize.test.ts`.
-
-**Suggestion:** Add dedicated test suite for hook lifecycle (`test/unit/hooks-lifecycle.test.ts`) covering:
-- All 10 hook types fire correctly
-- Blocking hooks prevent/retry operations
-- Non-blocking hooks don't block
-- Hook results persist correctly
-- Multiple hooks chain in order
-
-### C. Document Hook Extension Points for pi-crew Developers
-
-pi-crew's hook system is powerful but underdocumented as an extension API. Consider adding to `docs/`:
-- `hooks.md` — full hook registry with descriptions per phase
-- Example: custom `before_run_start` hook that auto-cancels if another run is active
-- Example: `task_result` hook that logs to external system
-
-### D. Add `AgentHarness` Awareness for Future Migration
-
-pi-mono is actively refactoring toward `AgentHarness` as the primary orchestrator. When `AgentHarness` stabilizes (removes `Agent` dependency, adds tool registry), pi-crew could potentially:
-
-- Replace `child-pi.ts` spawning with harness-based in-process execution for certain use cases
-- Use harness's session persistence instead of pi-crew's JSONL event log
-- Use harness's provider hooks for multi-model routing without IPC
-
-**This is NOT a near-term migration.** Keep current architecture. Monitor pi-mono harness maturation.
+- **Hook test suite** — cover `task_result`, `before_retry`, `before_publish`, `session_before_switch`, `run_recovery`
+- **Hook documentation** — `docs/hooks.md` with full registry, mode explanations, and 3+ examples
+- **Phase tracking** — task-level phase states surfaced in `team action='status'`
+- **Harness awareness** — monitor `AgentHarness` stabilization for future migration opportunities (not near-term)
 
 ---
 
