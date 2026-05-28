@@ -148,6 +148,8 @@ export interface ChildPiRunInput {
 	parentContext?: string;
 	/** When true, prepend parentContext to the task prompt. */
 	inheritContext?: boolean;
+	/** Pass to pi to mark certain commands as context-excluded. Default: false */
+	excludeContextBash?: boolean;
 }
 
 export interface ChildPiRunResult {

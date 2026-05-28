@@ -19,6 +19,8 @@ export interface PiTeamsAutonomousConfig {
 	preferAsyncForLongTasks?: boolean;
 	allowWorktreeSuggestion?: boolean;
 	magicKeywords?: Record<string, string[]>;
+	/** Mark certain bash commands as excludeFromContext to reduce context tokens. Default: false */
+	excludeContextBash?: boolean;
 }
 
 export interface CrewLimitsConfig {
@@ -66,6 +68,8 @@ export interface CrewRuntimeConfig {
 		/** Default runtime for roles not in isolatedRoles. Default: "live-session" (uses live-session). */
 		defaultRuntime?: "live-session" | "child-process";
 	};
+	/** Mark certain bash commands as excludeFromContext to reduce context tokens. Default: false */
+	excludeContextBash?: boolean;
 }
 
 export interface CrewControlConfig {

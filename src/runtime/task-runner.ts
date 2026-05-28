@@ -420,6 +420,7 @@ export async function runTeamTask(
 					graceTurns: input.runtimeConfig?.graceTurns,
 					inheritContext: input.runtimeConfig?.inheritContext,
 					parentContext: input.parentContext,
+					excludeContextBash: input.runtimeConfig?.excludeContextBash,
 					onSpawn: (pid) => {
 						try {
 							({ task, tasks } = checkpointTask(
