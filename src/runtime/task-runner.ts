@@ -38,6 +38,7 @@ import { runChildPi, type ChildPiLifecycleEvent } from "./child-pi.ts";
 import { buildTaskPacket } from "./task-packet.ts";
 import { executeHook, appendHookEvent } from "../hooks/registry.ts";
 import { createVerificationEvidence } from "./green-contract.ts";
+import { executeVerificationCommands, computeGreenLevelFromResults } from "./verification-gates.ts";
 import { createStartupEvidence } from "./worker-startup.ts";
 import { permissionForRole } from "./role-permission.ts";
 import { crewHooks } from "./crew-hooks.ts";
@@ -244,6 +245,7 @@ export async function runTeamTask(
 						teamRole: { skills: input.teamRoleSkills },
 						step: input.step,
 						override: input.skillOverride,
+						runId: manifest.runId,  // ECC INSTINCT: Enable skill confidence tracking
 					})
 				: undefined;
 		const skillBlock = input.skillBlock ?? renderedSkills?.block;
@@ -1011,16 +1013,75 @@ export async function runTeamTask(
 						}
 					: task.agentProgress,
 			error,
-			verification: createVerificationEvidence(
-				taskPacket.verification,
-				!error,
-				error
-					? `Task failed: ${error}`
-					: runtimeKind === "scaffold"
-						? "Safe scaffold mode; verification commands were not executed."
-						: `${runtimeKind} worker finished without reporting a verification failure.`,
-			),
-			promptArtifact,
+			error,
+			// ECC VERIFICATION_LOOP: Execute verification commands when task succeeded
+			// and verification contract has commands defined.
+			verification: (async () => {
+				// Start with default evidence based on task outcome
+				const baseEvidence = createVerificationEvidence(
+					taskPacket.verification,
+					!error,
+					error
+						? `Task failed: ${error}`
+						: runtimeKind === "scaffold"
+							? "Safe scaffold mode; verification commands were not executed."
+							: `${runtimeKind} worker finished without reporting a verification failure.`,
+				);
+
+				// Only execute verification commands when:
+				// 1. Task completed successfully (no error)
+				// 2. Verification contract has commands
+				// 3. Not in scaffold mode (scaffold mode intentionally skips execution)
+				if (error || runtimeKind === "scaffold" || !taskPacket.verification?.commands?.length) {
+					return baseEvidence;
+				}
+
+				try {
+					// Execute verification commands with phase gates
+					const commandResults = await executeVerificationCommands(
+						taskPacket.verification,
+						task.cwd,
+						manifest.runId,
+						task.id,
+						manifest.artifactsRoot,
+						input.signal,
+					);
+
+					// Compute observed green level from results
+					const observedGreenLevel = computeGreenLevelFromResults(
+						commandResults,
+						taskPacket.verification.requiredGreenLevel,
+					);
+
+					// Determine satisfaction based on green level
+					const requiredLevel = taskPacket.verification.requiredGreenLevel;
+					const satisfied =
+						observedGreenLevel === "none" ? false :
+						observedGreenLevel === "targeted" ? requiredLevel === "targeted" :
+						observedGreenLevel === "package" ? ["targeted", "package"].includes(requiredLevel) :
+						observedGreenLevel === "workspace" ? ["targeted", "package", "workspace"].includes(requiredLevel) :
+						observedGreenLevel === "merge_ready";
+
+					const allPassed = commandResults.every(r => r.status === "passed");
+					const failedCount = commandResults.filter(r => r.status === "failed").length;
+
+					return {
+						requiredGreenLevel: taskPacket.verification.requiredGreenLevel,
+						observedGreenLevel,
+						satisfied: satisfied && allPassed,
+						commands: commandResults,
+						notes: allPassed
+							? `${commandResults.length} verification commands passed`
+							: `${failedCount}/${commandResults.length} verification commands failed`,
+					};
+				} catch (execError) {
+					// On execution error, return base evidence with error note
+					return {
+						...baseEvidence,
+						notes: `Verification execution failed: ${execError instanceof Error ? execError.message : String(execError)}`,
+					};
+				}
+			})(),
 			resultArtifact,
 			claim: undefined,
 			heartbeat: touchWorkerHeartbeat(

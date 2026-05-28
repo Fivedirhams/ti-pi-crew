@@ -12,6 +12,8 @@ import type { ManifestCache } from "../runtime/manifest-cache.ts";
 import type { RunSnapshotCache, RunUiSnapshot } from "./snapshot-types.ts";
 import { notificationBadge } from "./crew-widget.ts";
 import { RenderCoalescer } from "./render-coalescer.ts";
+import { allWorkflows, discoverWorkflows } from "../workflows/discover-workflows.ts";
+import type { WorkflowConfig, WorkflowStep } from "../workflows/workflow-config.ts";
 
 type EventBus = { emit?: (event: string, data: unknown) => void; listenerCount?: (event: string) => number } | undefined;
 type StatusContext = { hasUI?: boolean; ui?: { setStatus?: (key: string, text: string | undefined) => void } } | undefined;
@@ -63,6 +65,7 @@ export function registerPiCrewPowerbarSegments(events: EventBus, config?: CrewUi
 	if (config?.powerbar === false) return;
 	safeEmit(events, "powerbar:register-segment", { id: "pi-crew-active", label: "pi-crew active agents" });
 	safeEmit(events, "powerbar:register-segment", { id: "pi-crew-progress", label: "pi-crew run progress" });
+	safeEmit(events, "powerbar:register-segment", { id: "pi-crew-steps", label: "pi-crew workflow steps" });
 }
 
 export function updatePiCrewPowerbar(events: EventBus, cwd: string, config?: CrewUiConfig, manifestCache?: ManifestCache, snapshotCache?: RunSnapshotCache, ctx?: StatusContext, notificationCount = 0, preloadedManifests?: TeamRunManifest[]): void {
@@ -108,26 +111,34 @@ export function updatePiCrewPowerbar(events: EventBus, cwd: string, config?: Cre
 	const model = config?.showModel === false ? undefined : agents.find((agent) => agent.model)?.model?.split("/").at(-1);
 	const tokenText = config?.showTokens === false || !tokenTotal ? undefined : compactTokens(tokenTotal);
 	const liveRunning = listLiveAgents().filter((a) => a.status === "running").length;
-	// Always show consistent status: running count + queued count (unified computation)
+	// Always show consistent status: running count + queued count from live tasks only
+	// Avoid snapshot cache for counts to prevent UI jumping
 	const runningCount = agents.filter((a) => a.status === "running").length;
-	const queuedCount = active.reduce((sum, item) => sum + (item.snapshot ? item.snapshot.progress.queued + (item.snapshot.progress.waiting ?? 0) : item.tasks.reduce((s, t) => s + (t.status === "queued" || t.status === "waiting" ? 1 : 0), 0)), 0);
+	// Count queued/waiting tasks directly from tasks array (not snapshot) for consistency
+	const queuedCount = active.reduce((sum, item) => sum + item.tasks.reduce((s, t) => s + (t.status === "queued" || t.status === "waiting" ? 1 : 0), 0), 0);
 	// Format: "1 running", "2 running · 1 queued", "3 queued", "idle"
 	const runningLabel = runningCount === 1 ? "1 running" : `${runningCount} running`;
 	const queuedLabel = queuedCount === 1 ? "1 queued" : `${queuedCount} queued`;
 	const crewStatus = runningCount > 0 && queuedCount > 0 ? `${runningLabel} · ${queuedLabel}` : runningCount > 0 ? runningLabel : queuedCount > 0 ? queuedLabel : "idle";
 	const liveSuffix = liveRunning > 0 ? ` (${liveRunning} live)` : "";
 	const notificationText = notificationBadge(notificationCount);
-	// Always show: ⚙ {status} {live} {notifications}
-	const activeText = `⚙ ${crewStatus}${liveSuffix}${notificationText}`;
-	// Always show model + tokens as suffix when available
+	// Always show model + tokens as suffix when available (for activePayload consistency)
 	const suffixParts = [model, tokenText].filter(Boolean);
 	const activeSuffix = suffixParts.length > 0 ? suffixParts.join(" · ") : undefined;
 	// Progress always includes token count for consistency
 	const progressSuffix = `${completed}/${total}${tokenText ? ` · ${tokenText}` : ""}`;
+	// Build complete, always-consistent fallback text AND event payload to prevent UI flickering
+	// Both fallback and events must use the SAME format - no conditional display
+	// Format: "⚙ 1 running · 1 queued · model · 30k · 0/1" (never changes based on availability)
+	const progressPart = `${completed}/${total}`;
+	const allParts = [`⚙ ${crewStatus}`, model ?? "", tokenText ?? "", progressPart].filter(Boolean);
+	const unifiedText = allParts.join(" · ");
+	// activePayload.text includes notification badge for event payload
 	const activePayload = {
 		id: "pi-crew-active",
 		icon: "⚙",
-		text: activeText,
+		text: `⚙ ${crewStatus}${liveSuffix}${notificationText}${activeSuffix ? ` · ${activeSuffix}` : ""}`,
+		text: unifiedText,
 		suffix: activeSuffix,
 		color: running ? "accent" : "warning",
 	} as const;
@@ -139,12 +150,15 @@ export function updatePiCrewPowerbar(events: EventBus, cwd: string, config?: Cre
 		color: completed === total ? "success" : "accent",
 		barSegments: 8,
 	} as const;
+	// Build step progress: "explorer > planner > executor > verifier" with current step highlighted
+	const stepsPayload = buildStepsPayload(active, tasks);
 	// 1.8: dedup per segment using a key over every visible field. Previously
 	// the dedup string only carried text/suffix/running, so changes to `bar`
 	// (progress %) or `color` could be swallowed and stale UI emitted again
 	// later as a single noisy burst.
 	const activeKey = powerbarKey(activePayload);
 	const progressKey = powerbarKey(progressPayload);
+	const stepsKey = powerbarKey(stepsPayload);
 	if (activeKey !== lastActiveKey) {
 		lastActiveKey = activeKey;
 		safeEmit(events, "powerbar:update", activePayload);
@@ -153,12 +167,18 @@ export function updatePiCrewPowerbar(events: EventBus, cwd: string, config?: Cre
 		lastProgressKey = progressKey;
 		safeEmit(events, "powerbar:update", progressPayload);
 	}
-	if (useStatusFallback) setStatusFallback(ctx, `${activeText}${activeSuffix ? ` · ${activeSuffix}` : ""} · ${progressSuffix}`);
+	if (stepsKey !== lastStepsKey) {
+		lastStepsKey = stepsKey;
+		safeEmit(events, "powerbar:update", stepsPayload);
+	}
+	// setStatusFallback provides a unified status when powerbar consumer exists but widget needs fallback
+	if (useStatusFallback) setStatusFallback(ctx, unifiedText);
 }
 
 // --- Dedup state: skip emit if segment data unchanged ---
 let lastActiveKey: string | undefined;
 let lastProgressKey: string | undefined;
+let lastStepsKey: string | undefined;
 
 interface PowerbarPayloadShape {
 	text?: string;
@@ -171,6 +191,63 @@ interface PowerbarPayloadShape {
 
 function powerbarKey(payload: PowerbarPayloadShape): string {
 	return `${payload.text ?? ""}|${payload.suffix ?? ""}|${payload.bar ?? ""}|${payload.color ?? ""}|${payload.icon ?? ""}|${payload.barSegments ?? ""}`;
+}
+
+interface ActiveItem {
+	run: TeamRunManifest;
+	agents: ReturnType<typeof readCrewAgents>;
+	tasks: TeamTaskState[];
+	snapshot?: RunUiSnapshot;
+}
+
+/**
+ * Build the workflow steps segment showing: ✓explore › →plan › ○execute › ○verify
+ * with the current/active step highlighted using → arrow.
+ */
+function buildStepsPayload(active: ActiveItem[], allTasks: TeamTaskState[]): PowerbarPayloadShape {
+	if (!active.length) {
+		return { id: "pi-crew-steps" };
+	}
+	const run = active[0]!.run;
+	const workflowName = run.workflow ?? "default";
+	// Load workflow steps
+	const workflows = allWorkflows(discoverWorkflows(run.cwd));
+	const workflow = workflows.find((w) => w.name === workflowName);
+	if (!workflow || workflow.steps.length === 0) {
+		return { id: "pi-crew-steps", text: workflowName };
+	}
+	// Build step status map from tasks
+	const stepStatus = new Map<string, "completed" | "running" | "pending">();
+	for (const task of allTasks) {
+		if (!task.stepId) continue;
+		if (!stepStatus.has(task.stepId)) {
+			if (task.status === "completed") {
+				stepStatus.set(task.stepId, "completed");
+			} else if (task.status === "running" || task.status === "queued" || task.status === "waiting") {
+				stepStatus.set(task.stepId, "running");
+			}
+		}
+	}
+	// Format: "✓explore › →plan › ○execute › ○verify"
+	// ✓ = completed, → = running (current), ○ = pending
+	const stepParts: string[] = [];
+	for (const step of workflow.steps) {
+		const status = stepStatus.get(step.id) ?? "pending";
+		const icon = status === "completed" ? "✓" : status === "running" ? "→" : "○";
+		// Shorten long step names
+		const stepName = step.id.length > 10 ? step.id.slice(0, 9) + "…" : step.id;
+		stepParts.push(`${icon}${stepName}`);
+	}
+	const stepsText = stepParts.join(" › ");
+	// Color: accent if running step exists, success if all complete, dim otherwise
+	const hasRunningStep = [...stepStatus.values()].includes("running");
+	const allComplete = stepStatus.size === workflow.steps.length && ![...stepStatus.values()].includes("running");
+	const color = allComplete ? "success" : hasRunningStep ? "accent" : "dim";
+	return {
+		id: "pi-crew-steps",
+		text: stepsText,
+		color,
+	};
 }
 
 // --- Coalesced powerbar update ---
@@ -222,8 +299,10 @@ export function disposePowerbarCoalescer(): void {
 export function clearPiCrewPowerbar(events: EventBus, ctx?: StatusContext): void {
 	lastActiveKey = undefined;
 	lastProgressKey = undefined;
+	lastStepsKey = undefined;
 	safeEmit(events, "powerbar:update", { id: "pi-crew-active" });
 	safeEmit(events, "powerbar:update", { id: "pi-crew-progress" });
+	safeEmit(events, "powerbar:update", { id: "pi-crew-steps" });
 	setStatusFallback(ctx, undefined);
 }
 
@@ -231,4 +310,5 @@ export function clearPiCrewPowerbar(events: EventBus, ctx?: StatusContext): void
 export function resetPowerbarDedupState(): void {
 	lastActiveKey = undefined;
 	lastProgressKey = undefined;
+	lastStepsKey = undefined;
 }

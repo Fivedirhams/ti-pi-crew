@@ -204,6 +204,11 @@ export const TeamToolParams = Type.Object({
 	once: Type.Optional(
 		Type.Union([Type.String(), Type.Number()], { description: "ISO timestamp or epoch ms for a one-time scheduled run." }),
 	),
+	excludeContextBash: Type.Optional(
+		Type.Boolean({
+			description: "Mark certain bash commands as excludeFromContext to reduce context tokens (default: false).",
+		}),
+	),
 });
 
 export interface TeamToolParamsValue {
@@ -287,4 +292,6 @@ export interface TeamToolParamsValue {
 	cron?: string;
 	interval?: number;
 	once?: string | number;
+	/** Mark certain bash commands as excludeFromContext to reduce context tokens (default: false). */
+	excludeContextBash?: boolean;
 }

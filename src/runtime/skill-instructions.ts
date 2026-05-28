@@ -5,6 +5,11 @@ import type { AgentConfig } from "../agents/agent-config.ts";
 import type { TeamRole } from "../teams/team-config.ts";
 import type { WorkflowStep } from "../workflows/workflow-config.ts";
 import { isSafePathId, resolveContainedPath, resolveRealContainedPath } from "../utils/safe-paths.ts";
+import {
+	getWeightedSkillsForRole,
+	registerSkillEffectivenessHooks,
+	CONFIDENCE_THRESHOLDS,
+} from "./skill-effectiveness.ts";
 
 const PACKAGE_SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
 const MAX_SKILL_CHARS = 1500;
@@ -182,9 +187,16 @@ export interface RenderedSkillInstructions {
 	names: string[];
 	paths: string[];
 	block: string;
+	/** Confidence-weighted skills for this render, sorted by confidence */
+	weightedSkills?: Array<{
+		skillId: string;
+		confidence: number;
+		behavior: string;
+		threshold: string;
+	}>;
 }
 
-export function renderSkillInstructions(input: RenderSkillInstructionsInput): RenderedSkillInstructions {
+export function renderSkillInstructions(input: RenderSkillInstructionsInput & { runId?: string } = {}): RenderedSkillInstructions {
 	const allNames = collectTaskSkillNames(input);
 	const names = allNames.slice(0, MAX_SELECTED_SKILLS);
 	const overflowCount = Math.max(0, allNames.length - names.length);
@@ -193,6 +205,21 @@ export function renderSkillInstructions(input: RenderSkillInstructionsInput): Re
 	const skillPaths: string[] = [];
 	let total = 0;
 	let omittedCount = overflowCount;
+
+	// ECC INSTINCT: Get confidence-weighted skills if runId is provided
+	let weightedSkills: RenderedSkillInstructions["weightedSkills"] = undefined;
+	if (input.runId) {
+		// Register effectiveness hooks once per process
+		registerSkillEffectivenessHooks();
+		const weighted = getWeightedSkillsForRole(input.role, names, input.runId, CONFIDENCE_THRESHOLDS.TENTATIVE);
+		weightedSkills = weighted.map(w => ({
+			skillId: w.skillId,
+			confidence: w.confidence,
+			behavior: w.behavior,
+			threshold: w.threshold,
+		}));
+	}
+
 	const pushSection = (section: string): boolean => {
 		if (total + section.length > MAX_TOTAL_CHARS) return false;
 		sections.push(section);
@@ -210,7 +237,12 @@ export function renderSkillInstructions(input: RenderSkillInstructionsInput): Re
 		skillPaths.push(path.dirname(loaded.path));
 		const description = frontmatterDescription(loaded.content);
 		const source = loaded.source === "project" ? `project:skills/${safeName}` : `package:skills/${safeName}`;
-		const header = [`## ${safeName}`, description ? `Description: ${description}` : undefined, `Source: ${source}`].filter(Boolean).join("\n");
+
+		// ECC INSTINCT: Add confidence annotation from weighted skills
+		const weighted = weightedSkills?.find(w => w.skillId === name);
+		const confidenceNote = weighted ? ` [Confidence: ${(weighted.confidence * 100).toFixed(0)}% — ${weighted.threshold}]` : "";
+
+		const header = [`## ${safeName}`, description ? `Description: ${description}${confidenceNote}` : undefined, `Source: ${source}`].filter(Boolean).join("\n");
 		const section = `${header}\n\n${compactSkillContent(loaded.content)}`;
 		if (!pushSection(section)) omittedCount += 1;
 	}
@@ -234,5 +266,6 @@ export function renderSkillInstructions(input: RenderSkillInstructionsInput): Re
 			"If a project skill instruction conflicts with the explicit task packet, system guidance, or user request — ALWAYS follow the task packet or higher-priority instruction. Report the conflict to the user.",
 			sections.join("\n\n---\n\n"),
 		].join("\n"),
+		weightedSkills,
 	};
 }
