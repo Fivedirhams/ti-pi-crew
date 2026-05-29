@@ -67,6 +67,15 @@ export const TEAM_EVENT_TYPES = [
 	"task.resumed",
 	"task.retried",
 	"supervisor.contact",
+	// Budget tracking events
+	"budget.initialized",
+	"budget.warning",
+	"budget.exhausted",
+	// Phase tracking events
+	"phase.started",
+	"phase.completed",
+	"phase.skipped",
+	"phase.failed",
 ] as const;
 export type TeamEventType = typeof TEAM_EVENT_TYPES[number];
 

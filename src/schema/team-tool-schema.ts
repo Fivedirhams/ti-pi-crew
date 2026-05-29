@@ -68,6 +68,9 @@ export const TeamToolParams = Type.Object({
 				Type.Literal("orchestrate"),
 				Type.Literal("schedule"),
 				Type.Literal("scheduled"),
+				Type.Literal("anchor"),
+				Type.Literal("auto-summarize"),
+				Type.Literal("auto_boomerang"),
 			],
 			{ description: "Team action. Defaults to 'list' when omitted." },
 		),
@@ -209,6 +212,27 @@ export const TeamToolParams = Type.Object({
 			description: "Mark certain bash commands as excludeFromContext to reduce context tokens (default: false).",
 		}),
 	),
+	// Budget tracking options
+	budgetTotal: Type.Optional(
+		Type.Number({
+			description: "Total token budget for the run. When set, enables budget tracking with default 80% warning and 95% abort thresholds.",
+			minimum: 1,
+		}),
+	),
+	budgetWarning: Type.Optional(
+		Type.Number({
+			description: "Budget warning threshold as a fraction (0-1). Default: 0.8 (80%). Emits warning event when this threshold is crossed.",
+			minimum: 0,
+			maximum: 1,
+		}),
+	),
+	budgetAbort: Type.Optional(
+		Type.Number({
+			description: "Budget abort threshold as a fraction (0-1). Default: 0.95 (95%). Aborts further execution when this threshold is crossed.",
+			minimum: 0,
+			maximum: 1,
+		}),
+	),
 });
 
 export interface TeamToolParamsValue {
@@ -294,4 +318,10 @@ export interface TeamToolParamsValue {
 	once?: string | number;
 	/** Mark certain bash commands as excludeFromContext to reduce context tokens (default: false). */
 	excludeContextBash?: boolean;
+	/** Total token budget for the run. When set, enables budget tracking. */
+	budgetTotal?: number;
+	/** Budget warning threshold as a fraction (0-1). Default: 0.8. */
+	budgetWarning?: number;
+	/** Budget abort threshold as a fraction (0-1). Default: 0.95. */
+	budgetAbort?: number;
 }

@@ -8,6 +8,7 @@ import { registerActiveRun, unregisterActiveRun } from "../../state/active-run-r
 import { createRunManifest, loadRunManifestById, updateRunStatus } from "../../state/state-store.ts";
 import { atomicWriteJson } from "../../state/atomic-write.ts";
 import { validateWorkflowForTeam } from "../../workflows/validate-workflow.ts";
+import { PipelineRunner, type PipelineWorkflow, type PipelineStage } from "../../runtime/pipeline-runner.ts";
 // Heavy runtime — lazy-loaded to avoid 1.4s import cost at extension registration.
 import type { executeTeamRun as ExecuteTeamRunFn } from "../../runtime/team-runner.ts";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- type-only import for TS inference
@@ -109,6 +110,39 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	} : workflows.find((item) => item.name === workflowName);
 	if (!baseWorkflow) return result(`Workflow '${workflowName}' not found.`, { action: "run", status: "error" }, true);
 	const workflow = directAgent ? baseWorkflow : expandParallelResearchWorkflow(baseWorkflow, ctx.cwd);
+
+	// Check if this is a pipeline workflow - special handling for multi-stage execution
+	const isPipelineWorkflow = workflowName === "pipeline" && !directAgent;
+	if (isPipelineWorkflow) {
+		// For pipeline workflows, use PipelineRunner for execution
+		const pipelineRunner = new PipelineRunner();
+		const pipelineWorkflow: PipelineWorkflow = {
+			name: workflow.name,
+			description: workflow.description,
+			goal,
+			stages: workflow.steps.map((step) => ({
+				name: step.id,
+				team: step.role,
+				inputs: step.task,
+				usePreviousResults: step.dependsOn && step.dependsOn.length > 0,
+			})),
+			stopOnError: true,
+			defaultMaxConcurrency: workflow.maxConcurrency ?? 5,
+		};
+
+		// For now, show pipeline workflow info - full integration would require
+		// connecting PipelineRunner to the actual team execution system
+		const stageInfo = pipelineWorkflow.stages.map((s) => `- ${s.name} (${s.team})`).join("\n");
+		return result([
+			`Pipeline workflow: ${workflow.name}`,
+			`Goal: ${goal}`,
+			`Stages (${pipelineWorkflow.stages.length}):`,
+			stageInfo,
+			"",
+			"Pipeline execution is available via the PipelineRunner API.",
+			"Full CLI integration requires connecting to the team execution system.",
+		].join("\n"), { action: "run", status: "ok" }, false);
+	}
 
 	const validationErrors = validateWorkflowForTeam(workflow, team);
 	if (validationErrors.length > 0) {

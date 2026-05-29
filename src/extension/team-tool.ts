@@ -170,6 +170,8 @@ import { handlePlan } from "./team-tool/plan.ts";
 import { handleOrchestrate } from "./team-tool/orchestrate.ts";
 import { handleRespond } from "./team-tool/respond.ts";
 import { handleStatus } from "./team-tool/status.ts";
+import { handleAnchorSet, handleAnchorClear, handleAnchorStatus, handleAnchorAccumulate } from "./team-tool/anchor.ts";
+import { handleAutoSummarizeOn, handleAutoSummarizeOff, handleAutoSummarizeStatus, handleAutoSummarizeConfig, createAutoSummarizeService } from "./team-tool/auto-summarize.ts";
 
 export { handleApi } from "./team-tool/api.ts";
 export { handleRetry } from "./team-tool/cancel.ts";
@@ -871,7 +873,7 @@ export async function handleTeamTool(
 	ctx: TeamContext,
 ): Promise<PiTeamsToolResult> {
 	const action = params.action ?? "list";
-	switch (action) {
+	switch (action as string) {
 		case "list":
 			return handleList(params, ctx);
 		case "get":
@@ -1157,6 +1159,41 @@ export async function handleTeamTool(
 			return handleSchedule(params, ctx);
 		case "scheduled":
 			return handleListScheduled(params, ctx);
+		case "anchor": {
+			const subAction = typeof params.config?.subAction === "string" ? params.config.subAction : "status";
+			switch (subAction) {
+				case "set":
+					return handleAnchorSet(params, ctx);
+				case "clear":
+					return handleAnchorClear(params, ctx);
+				case "accumulate":
+					return handleAnchorAccumulate(params, ctx);
+				default:
+					return handleAnchorStatus(params, ctx);
+			}
+		}
+		case "auto-summarize":
+		case "auto_boomerang": {
+			const subAction = typeof params.config?.subAction === "string" ? params.config.subAction : ((params.action as string) === "auto_boomerang" ? "toggle" : "status");
+			switch (subAction) {
+				case "on":
+					return handleAutoSummarizeOn(params, ctx);
+				case "off":
+					return handleAutoSummarizeOff(params, ctx);
+				case "config":
+					return handleAutoSummarizeConfig(params, ctx);
+				case "toggle": {
+					const service = createAutoSummarizeService();
+					service.toggle();
+					return result(
+						`Auto-summarize ${service.isEnabled() ? "enabled" : "disabled"}.`,
+						{ action: "auto-summarize", status: "ok" },
+					);
+				}
+				default:
+					return handleAutoSummarizeStatus(params, ctx);
+			}
+		}
 		case "onboard": {
 			const team = params.team ?? "default";
 			const onboarding = buildTeamOnboarding(team, ctx.cwd);

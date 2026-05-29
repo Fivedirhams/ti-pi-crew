@@ -1,0 +1,424 @@
+import type { TeamTaskState } from "../state/types.ts";
+import type { WorkflowConfig, WorkflowStep } from "../workflows/workflow-config.ts";
+import type { TeamConfig } from "../teams/team-config.ts";
+import type { AgentConfig } from "../agents/agent-config.ts";
+import { writeArtifact } from "../state/artifact-store.ts";
+import { appendEvent } from "../state/event-log.ts";
+import { mapConcurrent } from "./parallel-utils.ts";
+
+/**
+ * Pipeline stage configuration.
+ */
+export interface PipelineStage {
+	name: string;
+	team: string;
+	inputs: unknown;
+	/** Enable fan-out when inputs is an array (default: true) */
+	fanOut?: boolean;
+	/** Maximum concurrent executions for fan-out (default: 5) */
+	maxConcurrency?: number;
+	/** Stop pipeline if this stage fails (default: true) */
+	stopOnError?: boolean;
+	/** Pass previous stage results as inputs (default: true) */
+	usePreviousResults?: boolean;
+}
+
+/**
+ * Pipeline workflow configuration.
+ */
+export interface PipelineWorkflow {
+	name: string;
+	description: string;
+	goal: string;
+	stages: PipelineStage[];
+	/** Stop pipeline if any stage fails (default: true) */
+	stopOnError?: boolean;
+	/** Default max concurrency for fan-out stages */
+	defaultMaxConcurrency?: number;
+	/** Context passed to all stages */
+	context?: Record<string, unknown>;
+}
+
+/**
+ * Context passed to each stage execution.
+ */
+export interface PipelineContext {
+	stageIndex: number;
+	stageName: string;
+	previousResults: unknown[];
+	totalStages: number;
+	runId: string;
+}
+
+/**
+ * Result of a single stage execution.
+ */
+export interface StageResult {
+	name: string;
+	status: "completed" | "failed" | "skipped";
+	results: unknown[];
+	error?: string;
+	duration: number;
+	fanOutItems?: number;
+}
+
+/**
+ * Complete pipeline execution result.
+ */
+export interface PipelineResult {
+	stages: StageResult[];
+	totalDuration: number;
+	finalResults: unknown[];
+	status: "completed" | "failed" | "partial";
+}
+
+/**
+ * PipelineRunner executes multi-stage workflows with automatic fan-out
+ * for array inputs.
+ */
+export class PipelineRunner {
+	private stopOnError: boolean;
+	private defaultMaxConcurrency: number;
+
+	constructor(options?: { stopOnError?: boolean; defaultMaxConcurrency?: number }) {
+		this.stopOnError = options?.stopOnError ?? true;
+		this.defaultMaxConcurrency = options?.defaultMaxConcurrency ?? 5;
+	}
+
+	/**
+	 * Execute a pipeline workflow.
+	 * @param workflow - The pipeline workflow definition
+	 * @param context - Additional context for execution
+	 * @param executeStage - Function to execute a single stage
+	 * @param runId - Run identifier for event logging
+	 * @param eventsPath - Path to event log file
+	 */
+	async run(
+		workflow: PipelineWorkflow,
+		context: Record<string, unknown>,
+		executeStage: (stage: PipelineStage, inputs: unknown, stageContext: PipelineContext) => Promise<unknown>,
+		runId: string,
+		eventsPath: string,
+	): Promise<PipelineResult> {
+		const stages: StageResult[] = [];
+		let previousResults: unknown[] = [];
+		const startTime = Date.now();
+
+		appendEvent(eventsPath, {
+			type: "pipeline:started",
+			runId,
+			message: `Pipeline '${workflow.name}' started`,
+			data: { stages: workflow.stages.map((s) => s.name) },
+		});
+
+		for (let i = 0; i < workflow.stages.length; i++) {
+			const stage = workflow.stages[i];
+			const stageStartTime = Date.now();
+
+			// Determine stop behavior for this stage
+			const effectiveStopOnError = stage.stopOnError ?? workflow.stopOnError ?? this.stopOnError;
+
+			appendEvent(eventsPath, {
+				type: "pipeline:stage_started",
+				runId,
+				message: `Stage '${stage.name}' started`,
+				data: { stageIndex: i, stageName: stage.name },
+			});
+
+			try {
+				// Build stage context
+				const stageContext: PipelineContext = {
+					stageIndex: i,
+					stageName: stage.name,
+					previousResults,
+					totalStages: workflow.stages.length,
+					runId,
+				};
+
+			// Resolve inputs
+				const inputs = this.resolveInputs(stage.inputs, previousResults, context);
+
+				// Execute stage (handle fan-out if enabled)
+				const results = await this.executeStageInternal(
+					stage,
+					inputs,
+					stageContext,
+					executeStage,
+				);
+
+				const duration = Date.now() - stageStartTime;
+				stages.push({
+					name: stage.name,
+					status: "completed",
+					results,
+					duration,
+					fanOutItems: Array.isArray(inputs) ? inputs.length : undefined,
+				});
+
+				previousResults = results;
+
+				appendEvent(eventsPath, {
+					type: "pipeline:stage_completed",
+					runId,
+					message: `Stage '${stage.name}' completed`,
+					data: { stageIndex: i, stageName: stage.name, duration, resultCount: results.length },
+				});
+			} catch (error) {
+				const duration = Date.now() - stageStartTime;
+				const errorMessage = error instanceof Error ? error.message : String(error);
+
+				if (effectiveStopOnError) {
+					stages.push({
+						name: stage.name,
+						status: "failed",
+						results: [],
+						error: errorMessage,
+						duration,
+					});
+
+					appendEvent(eventsPath, {
+						type: "pipeline:stage_failed",
+						runId,
+						message: `Stage '${stage.name}' failed: ${errorMessage}`,
+						data: { stageIndex: i, stageName: stage.name, duration, error: errorMessage },
+					});
+
+					appendEvent(eventsPath, {
+						type: "pipeline:failed",
+						runId,
+						message: `Pipeline '${workflow.name}' failed at stage '${stage.name}'`,
+						data: { failedStage: stage.name, error: errorMessage },
+					});
+
+					return {
+						stages,
+						totalDuration: Date.now() - startTime,
+						finalResults: previousResults,
+						status: "failed",
+					};
+				} else {
+					stages.push({
+						name: stage.name,
+						status: "failed",
+						results: [],
+						error: errorMessage,
+						duration,
+					});
+
+					appendEvent(eventsPath, {
+						type: "pipeline:stage_skipped",
+						runId,
+						message: `Stage '${stage.name}' skipped due to error`,
+						data: { stageIndex: i, stageName: stage.name, duration, error: errorMessage },
+					});
+				}
+			}
+		}
+
+		appendEvent(eventsPath, {
+			type: "pipeline:completed",
+			runId,
+			message: `Pipeline '${workflow.name}' completed`,
+			data: { stages: stages.map((s) => ({ name: s.name, status: s.status })) },
+		});
+
+		return {
+			stages,
+			totalDuration: Date.now() - startTime,
+			finalResults: previousResults,
+			status: stages.some((s) => s.status === "failed") ? "partial" : "completed",
+		};
+	}
+
+	/**
+	 * Execute a single stage, handling fan-out for array inputs.
+	 */
+	private async executeStageInternal(
+		stage: PipelineStage,
+		inputs: unknown,
+		stageContext: PipelineContext,
+		callback: (stage: PipelineStage, inputs: unknown, stageContext: PipelineContext) => Promise<unknown>,
+	): Promise<unknown[]> {
+		const fanOut = stage.fanOut ?? true;
+		const maxConcurrency = stage.maxConcurrency ?? this.defaultMaxConcurrency;
+
+		// Fan-out if inputs is an array with multiple items to process.
+		// We don't fan-out for single-element arrays as they typically represent
+		// the result of a previous stage that returned a single value.
+		const shouldFanOut = fanOut && Array.isArray(inputs) && inputs.length > 1;
+
+		if (shouldFanOut) {
+			const tasks = (inputs as unknown[]).map((item, index) => ({
+				item,
+				index,
+				name: `${stage.name}[${index}]`,
+			}));
+
+			// Execute with concurrency limit - pass each item to callback
+			const results = await mapConcurrent(
+				tasks,
+				maxConcurrency,
+				async (task) => {
+					// Call the user-provided callback with each item
+					const result = await this.executeStageInternal(stage, task.item, {
+						...stageContext,
+						stageName: task.name,
+					}, callback);
+					return result;
+				},
+			);
+
+			return results;
+		}
+
+		// Single execution - pass inputs directly to callback
+		const result = await callback(stage, inputs, stageContext);
+		return [result];
+	}
+
+	/**
+	 * Resolve inputs from template strings and previous results.
+	 * Supports JMESPath-like resolution:
+	 * - ${previous} -> previousResults
+	 * - ${previous[0]} -> previousResults[0]
+	 * - ${context.key} -> context.key
+	 * - ${args.x} -> context.args.x
+	 */
+	private resolveInputs(
+		inputs: unknown,
+		previousResults: unknown[],
+		context: Record<string, unknown>,
+	): unknown {
+		// If inputs is an array, resolve each element
+		if (Array.isArray(inputs)) {
+			return inputs.map((input) => this.resolveInputs(input, previousResults, context));
+		}
+
+		// If inputs is a string, check for template patterns
+		if (typeof inputs === "string") {
+			return this.resolveTemplate(inputs, previousResults, context);
+		}
+
+		// If inputs is an object, resolve each value
+		if (typeof inputs === "object" && inputs !== null) {
+			const resolved: Record<string, unknown> = {};
+			for (const [key, value] of Object.entries(inputs)) {
+				resolved[key] = this.resolveInputs(value as string | string[] | Record<string, unknown>, previousResults, context);
+			}
+			return resolved;
+		}
+
+		// Primitive value - return as-is
+		return inputs;
+	}
+
+	/**
+	 * Resolve a single template string.
+	 */
+	private resolveTemplate(
+		template: string,
+		previousResults: unknown[],
+		context: Record<string, unknown>,
+	): unknown {
+		// Check for ${previous} pattern
+		const previousMatch = template.match(/^\$\{previous\}$/);
+		if (previousMatch) {
+			return previousResults;
+		}
+
+		// Check for ${previous[N]} pattern
+		const previousIndexMatch = template.match(/^\$\{previous\[(\d+)\]\}$/);
+		if (previousIndexMatch) {
+			const index = parseInt(previousIndexMatch[1], 10);
+			// Handle both array and single-value previousResults
+			if (Array.isArray(previousResults)) {
+				return previousResults[index];
+			} else if (index === 0) {
+				return previousResults;
+			}
+			return undefined;
+		}
+
+		// Check for ${context.key} pattern
+		const contextMatch = template.match(/^\$\{context\.([^}]+)\}$/);
+		if (contextMatch) {
+			const key = contextMatch[1];
+			return this.getNestedValue(context, key);
+		}
+
+		// Check for ${args.key} pattern
+		const argsMatch = template.match(/^\$\{args\.([^}]+)\}$/);
+		if (argsMatch) {
+			const key = argsMatch[1];
+			const args = (context.args as Record<string, unknown>) ?? {};
+			return this.getNestedValue(args, key);
+		}
+
+		// No pattern matched - return template as-is
+		return template;
+	}
+
+	/**
+	 * Get nested value from object using dot notation.
+	 */
+	private getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+		const parts = path.split(".");
+		let current: unknown = obj;
+
+		for (const part of parts) {
+			if (current === null || current === undefined) {
+				return undefined;
+			}
+			if (typeof current !== "object") {
+				return undefined;
+			}
+			current = (current as Record<string, unknown>)[part];
+		}
+
+		return current;
+	}
+
+	/**
+	 * Parse a pipeline workflow from a workflow configuration.
+	 * Converts standard WorkflowConfig to PipelineWorkflow.
+	 */
+	static fromWorkflowConfig(
+		workflow: WorkflowConfig,
+		goal: string,
+	): PipelineWorkflow {
+		const stages: PipelineStage[] = workflow.steps.map((step) => ({
+			name: step.id,
+			team: step.role, // Using role as team identifier
+			inputs: step.task,
+			usePreviousResults: step.dependsOn && step.dependsOn.length > 0,
+		}));
+
+		return {
+			name: workflow.name,
+			description: workflow.description,
+			goal,
+			stages,
+			stopOnError: true,
+			defaultMaxConcurrency: workflow.maxConcurrency ?? 5,
+		};
+	}
+}
+
+/**
+ * Create a pipeline workflow from a goal and stage definitions.
+ */
+export function createPipelineWorkflow(
+	name: string,
+	description: string,
+	goal: string,
+	stages: PipelineStage[],
+): PipelineWorkflow {
+	return {
+		name,
+		description,
+		goal,
+		stages,
+		stopOnError: true,
+		defaultMaxConcurrency: 5,
+	};
+}
