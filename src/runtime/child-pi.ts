@@ -10,6 +10,7 @@ import { logInternalError } from "../utils/internal-error.ts";
 import { attachPostExitStdioGuard, trySignalChild } from "./post-exit-stdio-guard.ts";
 import { redactJsonLine, SECRET_KEY_PATTERN } from "../utils/redaction.ts";
 import { sanitizeEnvSecrets } from "../utils/env-filter.ts";
+import { registerChildProcess, unregisterChildProcess } from "../extension/crew-cleanup.ts";
 
 const POST_EXIT_STDIO_GUARD_MS = DEFAULT_CHILD_PI.postExitStdioGuardMs;
 const FINAL_DRAIN_MS = DEFAULT_CHILD_PI.finalDrainMs;
@@ -152,6 +153,12 @@ export interface ChildPiRunInput {
 	excludeContextBash?: boolean;
 	/** pi session ID for session naming (aligns with pi-crew run ID) */
 	sessionId?: string;
+	/** Run ID for cleanup tracking */
+	runId?: string;
+	/** Agent ID for cleanup tracking */
+	agentId?: string;
+	/** Role for tool restrictions (from role-tools.ts) */
+	role?: string;
 }
 
 export interface ChildPiRunResult {
@@ -404,7 +411,7 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 		if (mock === "retryable-failure") return { exitCode: 1, stdout: "", stderr: "[MOCK] rate limit: mock failure" };
 		return { exitCode: 1, stdout: "", stderr: `[MOCK] failure: ${mock}` };
 	}
-	const built = buildPiWorkerArgs({ task: effectiveTask, agent: input.agent, model: input.model, sessionEnabled: true, maxDepth: input.maxDepth, skillPaths: input.skillPaths });
+	const built = buildPiWorkerArgs({ task: effectiveTask, agent: input.agent, model: input.model, sessionEnabled: true, maxDepth: input.maxDepth, skillPaths: input.skillPaths, role: input.role });
 	const spawnSpec = getPiSpawnCommand(built.args);
 	try {
 		return await new Promise<ChildPiRunResult>((resolve) => {
@@ -413,6 +420,10 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 				activeChildProcesses.set(child.pid, child);
 				input.onSpawn?.(child.pid);
 				input.onLifecycleEvent?.({ type: "spawned", pid: child.pid, ts: new Date().toISOString() });
+				// Register with cleanup handler for graceful shutdown
+				if (input.runId && input.agentId) {
+					registerChildProcess(child.pid, input.runId, input.agentId);
+				}
 			} else {
 				input.onLifecycleEvent?.({ type: "spawn_error", error: "spawn returned no pid", ts: new Date().toISOString() });
 			}
@@ -660,6 +671,8 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 				if (child.pid) {
 					activeChildProcesses.delete(child.pid);
 					clearHardKillTimer(child.pid);
+					// Unregister from cleanup handler
+					unregisterChildProcess(child.pid);
 				}
 				// Build comprehensive exit error for unexpected exits
 				const isUnexpectedExit = !childExited && !settled && !responseTimeoutHit && !abortRequested;
@@ -691,6 +704,8 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 				if (child.pid) {
 					activeChildProcesses.delete(child.pid);
 					clearHardKillTimer(child.pid);
+					// Unregister from cleanup handler
+					unregisterChildProcess(child.pid);
 				}
 				try {
 					input.onLifecycleEvent?.({ type: "close", pid: child.pid, exitCode, ts: new Date().toISOString() });

@@ -17,6 +17,7 @@ import {
 	stopAsyncRunNotifier,
 } from "./async-notifier.ts";
 import { registerAutonomousPolicy } from "./autonomous-policy.ts";
+import { registerCleanupHandler } from "./crew-cleanup.ts";
 import { notifyActiveRuns } from "./session-summary.ts";
 
 let _cachedLiveRunSidebar: typeof LiveRunSidebarType | undefined;
@@ -1800,6 +1801,8 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 			startForegroundRun(ctx as ExtensionContext, runner, runId),
 	});
 	time("register.tools");
+
+	registerCleanupHandler(pi);
 
 	registerTeamCommands(pi, {
 		startForegroundRun,

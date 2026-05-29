@@ -1,3 +1,6 @@
+import type { RoleToolConfig } from "../config/role-tools.ts";
+import { getToolConfig } from "../config/role-tools.ts";
+
 export type ResourceSource = "builtin" | "user" | "project" | "git" | "dynamic";
 
 export interface RoutingMetadata {
@@ -37,4 +40,40 @@ export interface AgentConfig {
 	disallowedTools?: string[];
 	disabled?: boolean;
 	override?: { source: "config"; path: string };
+}
+
+/**
+ * Get session options (tools/excludeTools) for a specific role.
+ * Used by child-pi to apply role-based tool restrictions.
+ */
+export function getAgentSessionOptions(role: string): {
+	tools?: string[];
+	excludeTools?: string[];
+} {
+	const config: RoleToolConfig = getToolConfig(role);
+
+	if (config.tools || config.excludeTools) {
+		return {
+			tools: config.tools,
+			excludeTools: config.excludeTools,
+		};
+	}
+
+	return {};
+}
+
+/**
+ * Build agent session options including role-based tool restrictions.
+ * @param agent - The agent configuration
+ * @param role - The role name to use for tool restrictions (defaults to agent.name)
+ */
+export function buildAgentSessionOptions(
+	agent: AgentConfig,
+	role?: string,
+): {
+	tools?: string[];
+	excludeTools?: string[];
+} {
+	const effectiveRole = role ?? agent.name;
+	return getAgentSessionOptions(effectiveRole);
 }

@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentConfig } from "../agents/agent-config.ts";
+import { getAgentSessionOptions } from "../agents/agent-config.ts";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const PROMPT_RUNTIME_EXTENSION_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "prompt", "prompt-runtime.ts");
@@ -17,6 +18,8 @@ export interface BuildPiWorkerArgsInput {
 	maxDepth?: number;
 	skillPaths?: string[];
 	env?: NodeJS.ProcessEnv;
+	/** Role for tool restrictions (uses role-tools.ts config) */
+	role?: string;
 }
 
 export interface BuildPiWorkerArgsResult {
@@ -99,7 +102,14 @@ export function buildPiWorkerArgs(input: BuildPiWorkerArgsInput): BuildPiWorkerA
 		args.push("--thinking", input.agent.thinking);
 	}
 
-	if (input.agent.tools?.length) args.push("--tools", input.agent.tools.join(","));
+	// Apply role-based tool restrictions (from role-tools.ts)
+	// Role-specific config takes precedence over agent-defined tools
+	const toolConfig = input.role ? getAgentSessionOptions(input.role) : {};
+	const explicitTools = toolConfig.tools ?? input.agent.tools;
+	const excludeTools = toolConfig.excludeTools;
+
+	if (explicitTools?.length) args.push("--tools", explicitTools.join(","));
+	if (excludeTools?.length) args.push("--exclude-tools", excludeTools.join(","));
 	// Always add --no-extensions before --extension to prevent user extensions from being auto-loaded.
 	// User extensions in ~/.pi/agent/extensions/ may fail due to missing dependencies.
 	args.push("--no-extensions");

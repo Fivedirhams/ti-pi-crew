@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.5.4] — pi v0.77.0 Integration (2026-05-29)
+
+### New Features
+
+**subscribe() API Integration**
+- Created `ProgressTracker` class for real-time agent session monitoring
+- Created `EventBus` singleton for cross-component event communication
+- Replaced file-based progress tracking with event-based tracking
+- 4 new tests for progress tracking functionality
+
+**session_shutdown Handler**
+- Created `crew-cleanup.ts` extension for graceful shutdown
+- Added `ChildProcessRegistry` to track and cleanup child processes
+- Registered handlers for SIGTERM/SIGHUP signals
+- Cleanup now properly kills all child-pi processes on shutdown
+
+**excludeTools for Role-Based Restrictions**
+- Created `role-tools.ts` with configurations for 8 agent roles
+- Explorer: read-only (excludes bash, edit, write)
+- Security Reviewer: strictest restrictions (excludes all write/exec)
+- Applied via `--tools` and `--exclude-tools` CLI flags to child processes
+
+### Dependencies
+- Updated `@earendil-works/pi-*` packages from `^0.75.5` to `^0.77.0`
+
+### Files Added
+- `src/types/new-api-types.ts` - Type imports and guards
+- `src/observability/event-bus.ts` - EventBus singleton
+- `src/runtime/progress-tracker.ts` - ProgressTracker class
+- `src/extension/crew-cleanup.ts` - Cleanup handlers
+- `src/config/role-tools.ts` - Role tool configurations
+- 4 new test files
+
 ## [0.5.3] — Deep Review Fixes + Security Hardening (2026-05-29)
 
 ### Security Fixes
