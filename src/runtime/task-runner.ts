@@ -425,6 +425,9 @@ export async function runTeamTask(
 					parentContext: input.parentContext,
 					excludeContextBash: input.runtimeConfig?.excludeContextBash,
 					sessionId: manifest.sessionId,
+					role: task.role,
+					runId: manifest.runId,
+					agentId: task.id,
 					onSpawn: (pid) => {
 						try {
 							({ task, tasks } = checkpointTask(
