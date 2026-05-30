@@ -47,12 +47,23 @@ role: planner
 input: previous-phase-results
 output: compacted-context.json
 
-**MANDATORY**: Before proceeding to the next phase, compact all accumulated context.
+**MANDATORY**: Before proceeding to next phase, compact context SMARTLY.
 
-Summarize previous phase results into a concise context (max 2000 tokens):
-- Key findings from completed tasks
-- Decisions made
-- Remaining work
-- Any blocking issues
+Tiered summary approach (DO NOT lose critical details):
 
-This prevents context overflow in long-running multi-phase workflows.
+### TIER 1 - Essential Summary (500 tokens max):
+- High-level findings
+- Key decisions made
+- Blockers if any
+
+### TIER 2 - Detailed Reference (3000 tokens max):
+- File:Line references for issues found
+- Key code snippets (max 5 most important)
+- Specific test failures with error messages
+
+### TIER 3 - Access Points (unlimited):
+- List of files modified/read
+- Commands to run (tests, builds)
+- Agent should READ FILES DIRECTLY, not rely on embedded content
+
+CRITICAL: Do NOT strip line numbers, error messages, or specific code references. Agents need these to fix issues.

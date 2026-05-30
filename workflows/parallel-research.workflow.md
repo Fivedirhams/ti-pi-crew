@@ -36,14 +36,21 @@ Explore the extension bundle/small-package shard from the discover output. Focus
 role: analyst
 dependsOn: explore-core, explore-ui, explore-runtime, explore-extensions
 
-**MANDATORY**: Before synthesizing, compact all explorer outputs (max 3000 tokens total).
+**MANDATORY**: Use tiered summarization to prevent losing details.
 
-Summarize key findings from each explorer:
-- Common patterns found
-- Key architectural decisions
-- Risks and recommendations
+### TIER 1 - Executive Summary (500 tokens):
+- 3-5 key patterns found across shards
+- Major architectural decisions
+- Top 3 risks
 
-Then synthesize into final analysis.
+### TIER 2 - Detailed Findings (3000 tokens):
+- Per-shard summaries with file:line references
+- Specific code patterns identified
+- Reusable utilities/functions found
+
+### TIER 3 - File Manifest (no limit):
+- List all files that warrant attention
+- Agent should read files directly when implementing
 
 ## write
 role: writer
