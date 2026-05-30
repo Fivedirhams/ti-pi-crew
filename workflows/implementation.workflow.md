@@ -1,6 +1,6 @@
 ---
 name: implementation
-description: Adaptive implementation workflow where a planner agent decides the subagent fanout
+description: Adaptive implementation workflow with mandatory context compaction between phases
 ---
 
 ## assess
@@ -41,3 +41,18 @@ Rules:
 - Do not include more than 12 total subagents; split or summarize oversized plans instead.
 - A good plan for a complex task has 2-4 phases with 2-4 parallel tasks each.
 - A simple task may have just 1-2 phases with 1-2 tasks.
+
+## compact
+role: planner
+input: previous-phase-results
+output: compacted-context.json
+
+**MANDATORY**: Before proceeding to the next phase, compact all accumulated context.
+
+Summarize previous phase results into a concise context (max 2000 tokens):
+- Key findings from completed tasks
+- Decisions made
+- Remaining work
+- Any blocking issues
+
+This prevents context overflow in long-running multi-phase workflows.

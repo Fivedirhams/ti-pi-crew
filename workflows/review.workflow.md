@@ -1,30 +1,31 @@
 ---
 name: review
-description: Review workflow for correctness and security
+description: Review workflow with mandatory context compaction
 ---
 
 ## explore
 role: explorer
 
-Identify changed or relevant areas for review: {goal}
+Identify changed or relevant areas for review: {goal}. Return a concise summary (max 500 tokens) of files to review.
 
 ## code-review
 role: reviewer
 dependsOn: explore
 parallelGroup: review
 
-Review correctness, maintainability, tests, and regressions.
+Review correctness, maintainability, tests, and regressions. Output findings (max 1500 tokens).
 
 ## security-review
 role: security-reviewer
 dependsOn: explore
 parallelGroup: review
 
-Review security risks and trust boundaries.
+Review security risks and trust boundaries. Output findings (max 1500 tokens).
 
 ## verify
 role: verifier
 dependsOn: code-review, security-review
-verify: true
+
+**MANDATORY**: Compact all review findings before verification (max 2000 tokens total).
 
 Run the project test suite ONCE (cache to .crew/cache/), then cross-reference test results with reviewer and security-reviewer findings. Confirm each finding against real test output. Give PASS if findings match evidence, FAIL if critical findings are false positives or tests reveal new issues.

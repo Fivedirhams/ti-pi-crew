@@ -1,6 +1,6 @@
 ---
 name: parallel-research
-description: Parallel research with shard exploration and synthesis
+description: Parallel research with shard exploration and mandatory context compaction
 ---
 
 ## discover
@@ -36,11 +36,18 @@ Explore the extension bundle/small-package shard from the discover output. Focus
 role: analyst
 dependsOn: explore-core, explore-ui, explore-runtime, explore-extensions
 
-Synthesize all shard findings. Use discover output if available, but do not require it. Identify common patterns, gaps, and concrete recommendations.
+**MANDATORY**: Before synthesizing, compact all explorer outputs (max 3000 tokens total).
+
+Summarize key findings from each explorer:
+- Common patterns found
+- Key architectural decisions
+- Risks and recommendations
+
+Then synthesize into final analysis.
 
 ## write
 role: writer
 dependsOn: synthesize
 output: research-summary.md
 
-Write a concise final summary with evidence, risks, and actionable next steps.
+Write a concise final summary with evidence, risks, and actionable next steps (max 2000 tokens).
