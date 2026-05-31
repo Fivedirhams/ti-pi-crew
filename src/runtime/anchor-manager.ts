@@ -1,4 +1,9 @@
 /**
+ * Maximum number of anchors to prevent memory leaks.
+ */
+const MAX_ANCHORS = 50;
+
+/**
  * AnchorManager - Creates shared summary points where multiple handoffs accumulate.
  * 
  * Based on pi-boomerang's anchorMode pattern:
@@ -182,6 +187,13 @@ export class AnchorManager {
 
 		// Create implicit anchor if doesn't exist - create directly with the given anchorId
 		if (!anchor) {
+			// Evict oldest anchor if at capacity
+			if (this.anchors.size >= MAX_ANCHORS) {
+				const oldest = this.anchors.keys().next().value;
+				if (oldest) {
+					this.anchors.delete(oldest);
+				}
+			}
 			const implicitAnchor: Anchor = {
 				id: anchorId,
 				sessionId: handoff.runId,

@@ -205,7 +205,7 @@ export class ChainRunner {
 					duration: Date.now() - stepStart,
 				});
 
-				allHandoffs.push(handoff);
+				if (handoff !== null) { allHandoffs.push(handoff); }
 
 				// Update accumulated context on success
 				if (result.outcome === "success") {
@@ -479,6 +479,7 @@ export class ChainRunner {
 		return {
 			taskId: `chain-step-${index}`,
 			runId: "chain",
+			sessionId: "chain",
 			goal: step.inlineGoal ?? step.name,
 		};
 	}

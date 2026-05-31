@@ -3,7 +3,7 @@ import type { WorkflowConfig, WorkflowStep } from "../workflows/workflow-config.
 import type { TeamConfig } from "../teams/team-config.ts";
 import type { AgentConfig } from "../agents/agent-config.ts";
 import { writeArtifact } from "../state/artifact-store.ts";
-import { appendEvent } from "../state/event-log.ts";
+import { appendEvent, appendEventAsync } from "../state/event-log.ts";
 import { mapConcurrent } from "./parallel-utils.ts";
 
 /**
@@ -104,7 +104,7 @@ export class PipelineRunner {
 		let previousResults: unknown[] = [];
 		const startTime = Date.now();
 
-		appendEvent(eventsPath, {
+		await appendEventAsync(eventsPath, {
 			type: "pipeline:started",
 			runId,
 			message: `Pipeline '${workflow.name}' started`,
@@ -118,7 +118,7 @@ export class PipelineRunner {
 			// Determine stop behavior for this stage
 			const effectiveStopOnError = stage.stopOnError ?? workflow.stopOnError ?? this.stopOnError;
 
-			appendEvent(eventsPath, {
+			await appendEventAsync(eventsPath, {
 				type: "pipeline:stage_started",
 				runId,
 				message: `Stage '${stage.name}' started`,
@@ -157,7 +157,7 @@ export class PipelineRunner {
 
 				previousResults = results;
 
-				appendEvent(eventsPath, {
+				await appendEventAsync(eventsPath, {
 					type: "pipeline:stage_completed",
 					runId,
 					message: `Stage '${stage.name}' completed`,
@@ -176,14 +176,14 @@ export class PipelineRunner {
 						duration,
 					});
 
-					appendEvent(eventsPath, {
+					await appendEventAsync(eventsPath, {
 						type: "pipeline:stage_failed",
 						runId,
 						message: `Stage '${stage.name}' failed: ${errorMessage}`,
 						data: { stageIndex: i, stageName: stage.name, duration, error: errorMessage },
 					});
 
-					appendEvent(eventsPath, {
+					await appendEventAsync(eventsPath, {
 						type: "pipeline:failed",
 						runId,
 						message: `Pipeline '${workflow.name}' failed at stage '${stage.name}'`,
@@ -205,7 +205,7 @@ export class PipelineRunner {
 						duration,
 					});
 
-					appendEvent(eventsPath, {
+					await appendEventAsync(eventsPath, {
 						type: "pipeline:stage_skipped",
 						runId,
 						message: `Stage '${stage.name}' skipped due to error`,
@@ -215,7 +215,7 @@ export class PipelineRunner {
 			}
 		}
 
-		appendEvent(eventsPath, {
+		await appendEventAsync(eventsPath, {
 			type: "pipeline:completed",
 			runId,
 			message: `Pipeline '${workflow.name}' completed`,

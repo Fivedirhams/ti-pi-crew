@@ -281,6 +281,10 @@ export class TeamBudgetTracker extends EventEmitter {
     this.warningEmitted = false;
     this.exhaustedEmitted = false;
     this.abortController = null;
+    if (this.abortInterval) {
+      clearInterval(this.abortInterval);
+      this.abortInterval = null;
+    }
   }
 
   /**
