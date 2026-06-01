@@ -209,9 +209,9 @@ export function getEventLogStats(eventsPath: string): EventLogStats | undefined 
 						if (newlineCount === 0) firstLineBytes = offset + i + 1;
 						newlineCount++;
 					}
-					}
-					offset += bytesRead;
 				}
+				offset += bytesRead;
+			}
 			} finally {
 				fs.closeSync(scanFd);
 			}
