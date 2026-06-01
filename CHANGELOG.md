@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.6] — Documentation Sync + Type-Only Import Fix (2026-06-01)
+
+### Documentation
+
+- **README.md** — Bumped to v0.5.6, refreshed security highlights section listing the 8 round-13 fixes.
+- **CHANGELOG.md** — Added the v0.5.5 entry covering all 13 rounds of code review hardening (this entry).
+- **SECURITY-ISSUES.md** — Bumped to v2.0, added v0.5.5 round-13 findings table (8 new issues closed).
+- **docs/architecture.md** — Cross-references v0.5.5 and `docs/pi-crew-v0.5.5-audit-fix-plan.md`.
+- **docs/migration-v0.4-v0.5.md** — Added v0.5.5 highlights (no breaking changes; drop-in replacement).
+
+### Fixes
+
+- **Type-only import** — `src/extension/team-tool/anchor.ts` now uses `import type { HandoffSummary }` from `handoff-manager.ts` directly, instead of pulling a value-style import through `anchor-manager.ts`. Fixes a `--experimental-strip-types` failure (`SyntaxError: The requested module does not provide an export named 'HandoffSummary'`) surfaced by `npm run typecheck` after the v0.5.5 docs bump.
+
+### Tests
+
+- 2273 tests pass / 0 failures (`npm test`).
+- `tsc --noEmit` and the strip-types import smoke test both pass.
+- `test/unit/discovery.test.ts` and `test/unit/implementation-fanout.test.ts` already updated in v0.5.5 to match the new workflow count (8) and the adaptive step layout (`["assess"]`).
+
 ## [0.5.5] — 13 Rounds of Code Review Hardening (2026-06-01)
 
 ### Security

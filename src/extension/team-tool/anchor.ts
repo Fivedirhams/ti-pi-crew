@@ -11,8 +11,8 @@ import {
 	createAnchorManager,
 	AnchorNotFoundError,
 	NoHandoffsError,
-	HandoffSummary,
 } from "../../runtime/anchor-manager.ts";
+import type { HandoffSummary } from "../../runtime/handoff-manager.ts";
 
 // Global anchor manager instance for CLI usage
 let globalAnchorManager: AnchorManager | null = null;
