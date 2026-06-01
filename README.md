@@ -9,7 +9,20 @@ npm: pi-crew
 repo: https://github.com/baphuongna/pi-crew
 ```
 
-**v0.5.2**: See [CHANGELOG.md](CHANGELOG.md).
+**v0.5.5**: See [CHANGELOG.md](CHANGELOG.md).
+
+### Security highlights (v0.5.5)
+
+- **ReDoS-free secret redaction** — linear-time scanning in `redaction.ts`; no catastrophic backtracking
+- **v8.deserialize hardened** — `BINARY_MAGIC` header guards on registry binaries prevent untrusted-file RCE
+- **Cache lock protection** — `withFileLockSync` and atomic writes across `run-cache.ts` and `state-store.ts`
+- **Shell injection prevented** — shell-metacharacter blocking in `benchmark-runner.ts`
+- **TOCTOU-free file ops** — atomic `mkdirSync` in `crew-init.ts`; `realpath`-based path validation
+- **Memory leaks capped** — `MAX_HANDOFFS_PER_ANCHOR=100`, `MAX_DELIVERY_MESSAGES=10000`, `MAX_RUNS=1000`
+- **Inline secret detection** — `token=`, `api_key=`, `password=` patterns redacted at event/mailbox boundaries
+- **Subagent log scrubbing** — pre-aborted signal logging no longer dumps unredacted params
+
+See [SECURITY-ISSUES.md](SECURITY-ISSUES.md) for the full list (SEC-001 – SEC-007 all marked fixed).
 
 ---
 
@@ -28,6 +41,9 @@ repo: https://github.com/baphuongna/pi-crew
 - **Observability** — metrics registry, Prometheus/OTLP exporters, heartbeat watching, deadletter queue
 - **Resource management** — create/update/delete agents, teams, workflows with validation
 - **Import/export** — portable run bundles for sharing and archiving
+- **Adaptive plan fanout** — single `assess` step lets a planner pick the smallest effective crew
+- **Adaptive workflows** — `implementation`, `review`, `parallel-research`, `research` workflows ship in `workflows/`
+- **Hardened secrets** — linear-time detection covers PEM keys, Authorization headers, Bearer tokens, and `key=value` patterns
 
 ---
 

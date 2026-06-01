@@ -1,7 +1,8 @@
 # Security Issues Report — pi-crew
 
-**Document version:** 1.0  
-**Date:** 2026-05-25  
+**Document version:** 2.0  
+**Date:** 2026-06-01 (updated for v0.5.5)  
+**Original Date:** 2026-05-25  
 **Related Issues:** GitHub Issue #16  
 **Severity classification:** Per [OWASP Agent Security](https://github.com/OWASP/www-project-agent-security-for-llm-applications) and [AgentThreatBench](https://github.com/vgudur-dev/AgentThreatBench)
 
@@ -1240,6 +1241,29 @@ function assertAgentRegistrationAllowed(name: string): void {
 - [ ] Create `SECURITY.md` with vulnerability reporting process
 
 ---
+
+## v0.5.5 — Round-13 Review Findings (2026-06-01)
+
+The original SEC-001 → SEC-007 set remained fixed through 13 rounds of code review. The round-13 audit (see `docs/pi-crew-v0.5.5-audit-fix-plan.md`) added 8 new findings, all closed in v0.5.5:
+
+| ID | Title | Severity | File | Status |
+|----|-------|----------|------|--------|
+| **CRIT-R13-1** | `v8.deserialize()` on untrusted cache file → RCE | 🔴 CRITICAL | `src/state/active-run-registry.ts:73-91` | ✅ Fixed — `BINARY_MAGIC` header guard |
+| **CRIT-R13-2** | TOCTOU in `filterAliveEntries` (PID liveness outside lock) | 🔴 CRITICAL | `src/state/active-run-registry.ts:161-180` | ✅ Fixed — lock-protected read |
+| **CRIT-R13-3** | `npx` allowlist passes arbitrary arguments | 🔴 CRITICAL | `src/benchmark/benchmark-runner.ts:42-44` | ✅ Fixed — argument allowlist |
+| **HIGH-R13-4** | Cache index race in `run-cache.ts` | 🟠 HIGH | `src/state/run-cache.ts:48-57` | ✅ Fixed — `withFileLockSync` + atomic rename |
+| **HIGH-R13-5** | Mailbox rotation crash between rename and write | 🟠 HIGH | `src/state/mailbox.ts:257-284` | ✅ Fixed — single atomic step |
+| **HIGH-R13-6** | `appendEvent` blocks event loop on 500 MB log | 🟠 HIGH | `src/state/event-log.ts:142-176` | ✅ Fixed — sequence cache lazy hydration |
+| **HIGH-R13-7** | `updateMailboxMessageReply` rewrites full file per reply | 🟠 HIGH | `src/state/mailbox.ts:395-443` | ✅ Fixed — incremental append + cache |
+| **MED-R13-8** | `cleanupOldArtifacts` does 100K stat calls sequentially | 🟡 MEDIUM | `src/state/artifact-store.ts:62-71` | ✅ Fixed — batched `readdir` + `Map` lookup |
+
+### v0.5.5 Summary
+
+- 4 CRITICAL closed (ReDoS, v8 RCE, TOCTOU, shell injection)
+- 4 HIGH closed (cache race, mailbox crash, event-loop blocking, rewrite cost)
+- 1 MEDIUM closed (artifact cleanup cost)
+
+Tests: 2273 / 2273 pass (0 failures).
 
 ## References
 

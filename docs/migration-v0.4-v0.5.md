@@ -1,8 +1,8 @@
 # pi-crew Migration Guide: v0.4 → v0.5
 
 **Author:** pi-crew team  
-**Date:** 2026-05-29  
-**Version:** 0.5.2
+**Date:** 2026-06-01  
+**Version:** 0.5.5
 
 ---
 
@@ -11,6 +11,23 @@
 This guide covers breaking changes and new features introduced in v0.5.x.
 
 ---
+
+## v0.5.5 Highlights (June 2026)
+
+v0.5.5 closes 13 rounds of code review. The user-facing changes are:
+
+- **Linear-time secret redaction** at all event/mailbox/artifact boundaries.
+- **v8.deserialize hardened** with `BINARY_MAGIC` headers — old binaries are auto-discarded.
+- **Adaptive implementation workflow** now has a single `assess` step; the planner picks the smallest effective crew.
+- **Async-notifier debounce** of 30 s — completion notifications can be delayed by up to 30 s.
+- **Mailbox delivery state capped at 10000 messages** — older entries are pruned FIFO.
+- **Anchors cap at 50 with 100 handoffs each** — older handoffs are pruned FIFO.
+
+No new public API is required for any of these changes. If you pinned a `BINARY_MAGIC`-guarded binary from a previous session, delete `~/.pi/agent/pi-crew/.cache/active-run-index.bin` once.
+
+## v0.5.4 → v0.5.5 Migration
+
+No breaking changes. Drop-in replacement.
 
 ## Breaking Changes
 

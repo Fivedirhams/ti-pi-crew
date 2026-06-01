@@ -2,6 +2,8 @@
 
 `pi-crew` is a Pi package for coordinated multi-agent work. It is intentionally durable-first: every run is represented on disk, every task has a state record, and child workers stream progress into JSONL/status files so foreground sessions, background jobs, dashboards, and later restarts all read the same source of truth.
 
+**Current version:** v0.5.5 — 13 rounds of code review hardening (see [CHANGELOG.md](../CHANGELOG.md) and [pi-crew-v0.5.5-audit-fix-plan.md](pi-crew-v0.5.5-audit-fix-plan.md)).
+
 ## Layers
 
 ```text

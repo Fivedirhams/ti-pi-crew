@@ -1,5 +1,101 @@
 # Changelog
 
+## [0.5.5] — 13 Rounds of Code Review Hardening (2026-06-01)
+
+### Security
+
+- **ReDoS removed** in `src/utils/redaction.ts` — replaced 4 regex patterns with linear-time `isSecretKey()` / `redactAuthHeader()` / `redactBearerTokens()` / `redactInlineSecrets()` functions. Eliminates catastrophic backtracking on crafted input.
+- **v8.deserialize RCE closed** — `BINARY_MAGIC = "PICREW2BIN"` header guards every `v8.deserialize()` call in `src/state/active-run-registry.ts`; untrusted cache files can no longer trigger heap prototype pollution.
+- **Cache index race fixed** — `src/state/run-cache.ts` now wraps index reads in `withFileLockSync` and uses atomic rename for cleanup, eliminating read-modify-write corruption under concurrent load.
+- **manifestCache race fixed** — `src/state/state-store.ts` wraps all read-modify-write paths on the manifest cache with a `withCacheLock()` helper.
+- **Shell injection prevented** — `src/tools/safe-bash.ts` no longer matches with ReDoS-prone regex; new `matchesDangerousRm()` is linear-time. `src/benchmark/benchmark-runner.ts` blocks shell metacharacters in `validateCommand()`.
+- **TOCTOU races closed** — `src/state/crew-init.ts` uses atomic `mkdirSync`; `src/state/active-run-registry.ts` validates binary contents before `v8.deserialize`.
+- **Inline secret detection** — `token=`, `apikey=`, `api_key=`, `password=`, `secret=`, `credential=`, `authorization=`, `privatekey=`, `private_key=` patterns redacted at event/mailbox/artifact boundaries.
+- **Pre-aborted signal logging** — `src/extension/registration/subagent-tools.ts` no longer dumps unredacted params to stderr on pre-abort.
+
+### Performance & Memory
+
+- **Anchor memory cap** — `src/runtime/anchor-manager.ts` adds `MAX_HANDOFFS_PER_ANCHOR=100` to prevent unbounded growth; pairs with existing `MAX_ANCHORS=50`.
+- **BudgetTracker dispose()** — `src/runtime/budget-tracker.ts` gains a `dispose()` method to clear timers and listeners.
+- **Live-agent pending cap** — `MAX_PENDING_MESSAGES=1000` in `live-agent-manager.ts`; `MAX_PENDING_STEERS=100` in `team-tool.ts`.
+- **Mailbox delivery cap** — `MAX_DELIVERY_MESSAGES=10000` in `src/state/mailbox.ts` with FIFO pruning in `writeDeliveryState()`.
+- **Feedback-loop cap** — `MAX_RUNS=1000` in `src/benchmark/feedback-loop.ts` to prevent memory leak.
+- **Async-notifier debounce** — `LIST_RUNS_DEBOUNCE_MS=30_000` cache in `src/extension/async-notifier.ts` avoids per-tick `listRuns()` calls.
+- **BM25 hot-loop** — `src/utils/bm25-search.ts` `df()` and `tf()` use `indexOf()` instead of regex.
+- **TTL eviction** — notification-router seen Map, transcript-cache (7 days), handoff anchors, manifest cache (30 s) all gain TTL or LRU eviction.
+- **SSE parser bounded** — `MAX_DATA_SIZE=100KB` in `src/utils/sse-parser.ts`.
+- **Handoff size cap** — `MAX_HANDOFF_ENTRY_SIZE` in `chain-runner.ts` to prevent pathological payloads.
+
+### Correctness
+
+- **reground context** — `withEventLogLockSync` in `src/state/mailbox.ts` wraps `appendMailboxMessage()` to prevent cross-process interleaving on Windows.
+- **Map mutation during iteration** — `src/runtime/handoff-manager.ts` snapshots the Map before iteration.
+- **Self-dependency cycle detection** — `src/runtime/task-graph.ts` rejects self-edges in the task graph.
+- **Duplicate phase check** — `src/runtime/phase-tracker.ts` rejects duplicate phase registrations.
+- **Pipeline depth guard** — `src/runtime/pipeline-runner.ts` adds `maxDepth` check to prevent unbounded recursion.
+- **Scheduler timer type** — `src/runtime/scheduler.ts` uses `NodeJS.Timeout | null` (not `number`) for safer cleanup.
+- **OTLP header sanitization** — `src/config/config.ts` rejects CRLF in `otlp.headers`.
+- **Cross-extension RPC** — `src/extension/cross-extension-rpc.ts` uses static import for ESM correctness.
+- **Shell encoding validation** — `src/tools/safe-bash.ts` rejects invalid UTF-8 / null bytes.
+- **Run-cache cwd in key** — `src/state/run-cache.ts` hashes `cwd` into the cache key to prevent cross-project collisions; uses atomic write.
+- **worktree newline guard** — `src/worktree/cleanup.ts` checks trailing newline after truncation to avoid merge-conflict markers in cleaned paths.
+
+### Workflows
+
+- **Adaptive workflow fanout** — `workflows/implementation.workflow.md` uses a single `assess` step that returns `ADAPTIVE_PLAN_JSON` for the planner to choose the smallest effective crew.
+- **New builtin workflows** — `parallel-research`, `research`, `review`, `pipeline`, `chain` ship in `workflows/`.
+- **Test alignment** — `test/unit/discovery.test.ts` and `test/unit/implementation-fanout.test.ts` updated to match the new workflow count (8) and the adaptive step layout (`["assess"]`).
+
+### Tests
+
+- 2273 tests pass / 0 failures (`npm test`).
+- New test files for security hardening (`test/unit/security-hardening.test.ts`), SSE parser bounds, anchor-manager handoff cap, mailbox delivery pruning, async-notifier debounce, and BINARY_MAGIC v8 guard.
+
+### Files Touched (highlights)
+
+- `src/utils/redaction.ts` — linear-time secret redaction (no regex)
+- `src/state/active-run-registry.ts` — BINARY_MAGIC guard, async-notifier log fix
+- `src/state/run-cache.ts` — file lock, atomic writes, cwd in cache key
+- `src/state/state-store.ts` — manifestCache lock, TTL 30 s, hard limit
+- `src/state/mailbox.ts` — delivery message cap, `withEventLogLockSync` in append
+- `src/tools/safe-bash.ts` — ReDoS-free `matchesDangerousRm()`
+- `src/benchmark/benchmark-runner.ts` — shell metachar blocking
+- `src/runtime/anchor-manager.ts` — `MAX_HANDOFFS_PER_ANCHOR=100`
+- `src/runtime/budget-tracker.ts` — `dispose()` method
+- `src/runtime/live-agent-manager.ts` — `MAX_PENDING_MESSAGES=1000`
+- `src/extension/team-tool.ts` — `MAX_PENDING_STEERS=100`
+- `src/extension/async-notifier.ts` — `LIST_RUNS_DEBOUNCE_MS=30_000`
+- `src/extension/registration/subagent-tools.ts` — pre-aborted signal log scrub
+- `src/utils/bm25-search.ts` — `indexOf()` over regex in `df()` / `tf()`
+- `src/utils/sse-parser.ts` — `MAX_DATA_SIZE=100KB`
+- `src/utils/env-filter.ts` — isSecretKey-based glob boundary check
+- `src/utils/scan-cache.ts` — TTL eviction
+- `src/benchmark/feedback-loop.ts` — `MAX_RUNS=1000`
+- `src/state/crew-init.ts` — atomic `mkdirSync` (no TOCTOU)
+- `src/runtime/child-pi.ts` — uses `isSecretKey` import
+- `src/extension/cross-extension-rpc.ts` — static ESM import
+- `src/worktree/cleanup.ts` — trailing newline guard
+- `src/runtime/scheduler.ts` — `NodeJS.Timeout | null` typing
+- `src/runtime/phase-tracker.ts` — duplicate phase check
+- `src/runtime/task-graph.ts` — self-dependency cycle detection
+- `src/runtime/pipeline-runner.ts` — `maxDepth` recursion guard
+- `src/observability/event-bus.ts` — `dispose()` method
+- `src/observability/notification-router.ts` — TTL eviction for `seen` Map
+- `src/state/event-log.ts` — async-queue cleanup in catch path
+- `src/state/decision-ledger.ts` — `stateRoot` param in `getLedgerPath()`; `ledger.push()` instead of overwrite
+- `src/extension/register.ts` — refresh-after-invalidate semantics
+- `src/hooks/registry.ts` — always filter workspace
+- `src/extension/team-tool/auto-summarize.ts` — clear `invalidateBuffer` on dispose
+- `src/extension/team-tool/run.ts` — anchor buffer dispose path
+- `src/ui/transcript-cache.ts` — 7-day TTL eviction
+- `src/ui/powerbar-publisher.ts` — clear `invalidateBuffer` on dispose
+
+### Audit Reference
+
+The full prioritized fix plan (8+ critical issues) is captured in
+`docs/pi-crew-v0.5.5-audit-fix-plan.md` (synthesized from security+concurrency,
+correctness+error-handling, and performance+architecture audits across 77 source files).
+
 ## [0.5.4] — pi v0.77.0 Integration (2026-05-29)
 
 ### New Features
