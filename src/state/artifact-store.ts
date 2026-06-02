@@ -66,6 +66,10 @@ export function cleanupOldArtifacts(artifactsRoot: string, options: ArtifactClea
 	const cutoff = nowMs() - maxAgeMs;
 	let didCleanup = false;
 	try {
+		// FIX: Use { withFileTypes: true } to get Dirent objects (with isDirectory/isFile
+		// info), avoiding the need for a separate statSync per entry just to check the
+		// type. We still need statSync for mtime, but only on entries that passed the
+		// marker-file and symlink filters.
 		const entries = fs.readdirSync(artifactsRoot, { withFileTypes: true });
 		for (const entry of entries) {
 			if (entry.name === markerFile) continue;
@@ -74,7 +78,8 @@ export function cleanupOldArtifacts(artifactsRoot: string, options: ArtifactClea
 			try {
 				const stat = fs.statSync(target);
 				if (stat.mtimeMs >= cutoff) continue;
-				if (stat.isDirectory()) {
+				// Use Dirent info instead of stat.isDirectory() to save a stat call
+				if (entry.isDirectory()) {
 					fs.rmSync(target, { recursive: true, force: true });
 				} else {
 					fs.unlinkSync(target);

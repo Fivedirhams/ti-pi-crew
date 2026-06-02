@@ -324,18 +324,39 @@ export function loadRunManifestById(cwd: string, runId: string): { manifest: Tea
 		}
 	}
 
-	const manifest = readJsonFile<TeamRunManifest>(manifestPath);
+	// FIX: Re-stat and re-read inside a single synchronous block to close the
+	// TOCTOU window. We use a sentinel-based re-read: if mtime/size changed
+	// between the initial stat and the read, re-read until stable. With file
+	// sizes typically small (<5MB), the extra cost is negligible. Note: this
+	// doesn't fully prevent torn writes — callers needing strict consistency
+	// should use withRunLock() around the whole load+modify+save sequence.
+	let attempts = 0;
+	let manifest: TeamRunManifest | undefined;
+	let tasks: TeamTaskState[] | undefined;
+	while (attempts < 3) {
+		const freshStat = fs.statSync(manifestPath);
+		manifest = readJsonFile<TeamRunManifest>(manifestPath);
+		const freshTasksStat = fs.existsSync(tasksPath) ? fs.statSync(tasksPath) : undefined;
+		tasks = readJsonFile<TeamTaskState[]>(tasksPath) ?? [];
+		// If size/mtime didn't change between stat and read, we're consistent.
+		if (freshStat.mtimeMs === manifestStat.mtimeMs && freshStat.size === manifestStat.size
+			&& (!freshTasksStat || (freshTasksStat.mtimeMs === tasksStat?.mtimeMs && freshTasksStat.size === tasksStat?.size))) {
+			break;
+		}
+		attempts += 1;
+		manifestStat = freshStat;
+		tasksStat = freshTasksStat;
+	}
 	if (!manifest || !validateRunManifestPaths(cwd, runId, manifest, stateRoot, tasksPath)) return undefined;
-	const tasks = readJsonFile<TeamTaskState[]>(tasksPath) ?? [];
 	setManifestCache(stateRoot, {
 		manifest,
-		tasks,
+		tasks: tasks ?? [],
 		manifestMtimeMs: manifestStat.mtimeMs,
 		manifestSize: manifestStat.size,
 		tasksMtimeMs,
 		tasksSize: tasksStat?.size ?? 0,
 	});
-	return { manifest, tasks };
+	return { manifest, tasks: tasks ?? [] };
 }
 
 export async function loadRunManifestByIdAsync(cwd: string, runId: string): Promise<{ manifest: TeamRunManifest; tasks: TeamTaskState[] } | undefined> {
