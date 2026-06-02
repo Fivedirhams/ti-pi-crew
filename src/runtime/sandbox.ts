@@ -1,5 +1,7 @@
 import * as vm from "node:vm";
 
+import { sanitizeEnvSecrets } from "../utils/env-filter.ts";
+
 /**
  * Forbidden patterns for sandbox security (C4).
  * These are checked during script compilation/validation.
@@ -62,16 +64,39 @@ export class WorkflowSandbox {
 	}
 
 	private createSafeContext(globals: Record<string, unknown>, options: SandboxOptions): vm.Context {
-		// C4: Frozen process object - limited access to process internals
-		const frozenProcess = {
+		// C4: Frozen process object - limited access to process internals.
+		// FIX (Round 14, C1+C3): Sanitize env to a small allow-list so secrets
+		// like ANTHROPIC_API_KEY, AWS_SECRET_ACCESS_KEY, etc. never reach
+		// sandboxed code. Then deep-freeze the env so callers cannot inject
+		// new keys (Object.freeze on the wrapper alone would not prevent
+		// `frozenProcess.env.newKey = "..."`).
+		const safeEnv = Object.freeze(sanitizeEnvSecrets(process.env, {
+			allowList: [
+				"NODE_ENV",
+				"PI_CREW_*",
+				"PATH",
+				"PATH_SEPARATOR",
+				"USERPROFILE",
+				"USER",
+				"SHELL",
+				"LANG",
+				"LC_ALL",
+				"LC_CTYPE",
+				"TERM",
+				"TZ",
+				"TMPDIR",
+				"TMP",
+				"TEMP",
+			],
+		}));
+		const frozenProcess = Object.freeze({
 			cwd: () => process.cwd(),
 			platform: process.platform,
 			arch: process.arch,
 			version: process.version,
-			env: { ...process.env }, // Copy, not reference
+			env: safeEnv,
 			// Explicitly excluded: exit, kill, hrtime, memoryUsage, cpuUsage, binding, dlopen, _tickCallback
-		};
-		Object.freeze(frozenProcess);
+		});
 
 		// Safe console implementation
 		const safeConsole = {
@@ -199,7 +224,13 @@ export class WorkflowSandbox {
 	 */
 	async executeAsync<T>(fn: () => Promise<T>, timeout?: number): Promise<T> {
 		const effectiveTimeout = timeout ?? this.timeout;
-		const script = new vm.Script(`(${fn.toString()})()`, {
+		// FIX (Round 14, C2): Run the same validation chain as `execute()` so
+		// forbidden patterns (require/import/__dirname/etc.) cannot slip through
+		// by hiding inside an arrow function. Previously the function body was
+		// stringified and executed with no checks.
+		const fnSource = fn.toString();
+		this.validateScript(fnSource);
+		const script = new vm.Script(`(${fnSource})()`, {
 			filename: "workflow.js",
 		});
 
