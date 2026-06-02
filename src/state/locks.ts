@@ -126,11 +126,20 @@ async function acquireLockWithRetryAsync(filePath: string, staleMs: number): Pro
 			if (Date.now() > deadline) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
-			// If lock is not stale, fail fast (async should not wait for active locks)
-			if (!isLockStale(filePath, staleMs)) {
+			// FIX (Round 14, locks-async): Mirror the sync path's staleness AND
+			// PID liveness check. Previously the async path only checked
+			// staleness, so a recently-reused PID could have its lock stolen
+			// even while still running. Now: fresh + alive holder = fail.
+			const isStale = isLockStale(filePath, staleMs);
+			const isHolderAlive = isLockHolderAlive(filePath);
+			if (!isStale && isHolderAlive) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
-			readLockStateAsync(filePath, staleMs);
+			// Lock is stale OR holder is dead — safe to clear
+			try {
+				fs.rmSync(filePath, { force: true });
+			} catch { /* race — let loop retry */ }
+			await readLockStateAsync(filePath, staleMs);
 			const delay = Math.min(250, 25 * 2 ** attempt);
 			await sleep(delay);
 			attempt++;

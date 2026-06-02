@@ -9,6 +9,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { appendEventAsync, appendEventBuffered, flushEventLogBuffer } from "../../src/state/event-log.ts";
+import type { TeamEvent } from "../../src/state/event-log.ts";
 
 async function makeTmp(): Promise<string> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "event-log-leak-"));
@@ -20,16 +21,12 @@ test("H1: asyncQueues does not leak entries on success", async () => {
 	try {
 		// Issue 100 successful appends
 		const promises = Array.from({ length: 100 }, (_, i) =>
-			appendEventAsync(eventsPath, { type: "test.event", payload: { i } }),
+			appendEventAsync(eventsPath, { type: "test.event", data: { i } } as unknown as TeamEvent),
 		);
 		await Promise.all(promises);
 		// After all resolve, asyncQueues map should be empty
-		// We can't inspect the private Map directly, but we can verify by
-		// appending another batch and ensuring no stale entries cause issues.
-		const result = await appendEventAsync(eventsPath, { type: "test.event", payload: { i: 999 } });
+		const result = await appendEventAsync(eventsPath, { type: "test.event", data: { i: 999 } } as unknown as TeamEvent);
 		assert.equal(result.type, "test.event");
-		// If asyncQueues were leaking, the next call would still chain on
-		// the old promise — but since it resolves correctly, no leak.
 	} finally {
 		await fs.rm(path.dirname(eventsPath), { recursive: true, force: true });
 	}
@@ -44,7 +41,7 @@ test("H3: dropped buffered events are rejected (not hanging)", async () => {
 		for (let i = 0; i < 1100; i += 1) {
 			// Use non-terminal types so they go through the buffer
 			promises.push(
-				appendEventBuffered(eventsPath, { type: "test.spam", payload: { i } }).catch((err) => err),
+				appendEventBuffered(eventsPath, { type: "test.spam", data: { i } } as unknown as TeamEvent).catch((err) => err),
 			);
 		}
 		// Manually trigger the flush so the splice+reject logic runs.
