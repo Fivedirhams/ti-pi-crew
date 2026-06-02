@@ -38,6 +38,16 @@ multi-perspective-review (8-pass deep review)
 secure-agent-orchestration-review (security focus)
 ```
 
+### Multi-Round Audit (5-20 rounds)
+
+```
+iterative-audit (round planning, 7 patterns, diminishing-returns)
+    ↓
+multi-perspective-review (per round, optional)
+    ↓
+verification-before-done (per round)
+```
+
 ---
 
 ## When to Invoke
@@ -48,6 +58,7 @@ secure-agent-orchestration-review (security focus)
 | Before claiming done | `verification-before-done` |
 | Code review (quick) | `scrutinize` |
 | Code review (deep) | `multi-perspective-review` |
+| Multi-round audit (5-20 rounds) | `iterative-audit` |
 | Task delegation | `delegation-patterns` |
 | Complex multi-phase work | `orchestration` |
 | After bug is fixed | `post-mortem` |
