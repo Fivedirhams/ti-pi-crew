@@ -167,11 +167,16 @@ function nextSequence(eventsPath: string): number {
 	if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
 		return cached.seq + 1;
 	}
-	let current = readStoredSequence(eventsPath);
-	if (current === undefined || (cached && stat.size < cached.size)) {
-		current = scanSequence(eventsPath);
+	// FIX: Trust the sidecar seq file if it exists and the file is non-empty.
+	// Only fall back to O(n) scan if sidecar is missing or file shrunk unexpectedly.
+	const stored = readStoredSequence(eventsPath);
+	if (stored !== undefined && (!cached || stat.size >= cached.size)) {
+		sequenceCache.set(eventsPath, { size: stat.size, mtimeMs: stat.mtimeMs, seq: stored });
+		return stored + 1;
 	}
+	const current = scanSequence(eventsPath);
 	sequenceCache.set(eventsPath, { size: stat.size, mtimeMs: stat.mtimeMs, seq: current });
+	persistSequence(eventsPath, current);
 	return current + 1;
 }
 

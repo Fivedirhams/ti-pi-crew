@@ -263,12 +263,41 @@ export function readCrewAgentStatus(manifest: TeamRunManifest, taskOrAgentId: st
 }
 
 const agentEventSeqCache = new Map<string, { size: number; mtimeMs: number; seq: number }>();
+const AGENT_EVENT_SEQ_SIDECAR = ".seq";
+
+function readSeqFromSidecar(filePath: string): number | undefined {
+	try {
+		const raw = fs.readFileSync(`${filePath}.${AGENT_EVENT_SEQ_SIDECAR}`, "utf-8");
+		const n = Number.parseInt(raw, 10);
+		return Number.isFinite(n) && n > 0 ? n : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function writeSeqToSidecar(filePath: string, seq: number): void {
+	try {
+		fs.writeFileSync(`${filePath}.${AGENT_EVENT_SEQ_SIDECAR}`, String(seq));
+	} catch (error) {
+		logInternalError("crew-agent-records.seq-sidecar", error, `filePath=${filePath}`);
+	}
+}
 
 function nextAgentEventSeq(filePath: string): number {
-	if (!fs.existsSync(filePath)) return 1;
+	if (!fs.existsSync(filePath)) {
+		// Clean up stale sidecar when main file is gone.
+		try { fs.unlinkSync(`${filePath}.${AGENT_EVENT_SEQ_SIDECAR}`); } catch {}
+		return 1;
+	}
 	const stat = fs.statSync(filePath);
 	const cached = agentEventSeqCache.get(filePath);
 	if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.seq + 1;
+	// FIX: Try sidecar file for O(1) lookup before falling back to O(n) scan.
+	const sidecarSeq = readSeqFromSidecar(filePath);
+	if (sidecarSeq !== undefined) {
+		agentEventSeqCache.set(filePath, { size: stat.size, mtimeMs: stat.mtimeMs, seq: sidecarSeq });
+		return sidecarSeq + 1;
+	}
 	let max = 0;
 	for (const line of fs.readFileSync(filePath, "utf-8").split(/\r?\n/)) {
 		if (!line.trim()) continue;
@@ -281,6 +310,7 @@ function nextAgentEventSeq(filePath: string): number {
 		}
 	}
 	agentEventSeqCache.set(filePath, { size: stat.size, mtimeMs: stat.mtimeMs, seq: max });
+	writeSeqToSidecar(filePath, max);
 	return max + 1;
 }
 
@@ -292,6 +322,7 @@ export function appendCrewAgentEvent(manifest: TeamRunManifest, taskId: string, 
 	try {
 		const stat = fs.statSync(filePath);
 		agentEventSeqCache.set(filePath, { size: stat.size, mtimeMs: stat.mtimeMs, seq });
+		writeSeqToSidecar(filePath, seq);
 	} catch (error) {
 		logInternalError("crew-agent-records.stat", error, `filePath=${filePath}`);
 	}
