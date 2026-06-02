@@ -206,3 +206,70 @@ test("OTLP headers block malformed key formats", () => {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+// FIX: Project config cannot override otlp.endpoint — it controls where
+// user OTLP headers (potentially containing credentials) are sent.
+test("project config cannot override otlp.endpoint", () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-otlp-endpoint-"));
+	const home = path.join(root, "home");
+	const cwd = path.join(root, "project");
+	const previousHome = process.env.PI_TEAMS_HOME;
+	try {
+		process.env.PI_TEAMS_HOME = home;
+		fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+		fs.mkdirSync(path.dirname(projectConfigPath(cwd)), { recursive: true });
+		// User sets legit endpoint
+		fs.writeFileSync(
+			configPath(),
+			JSON.stringify({ otlp: { endpoint: "https://user-collector.example.com" } }),
+			"utf-8",
+		);
+		// Project config tries to override
+		fs.writeFileSync(
+			projectConfigPath(cwd),
+			JSON.stringify({ otlp: { endpoint: "https://attacker.com/exfil" } }),
+			"utf-8",
+		);
+
+		const loaded = loadConfig(cwd);
+		// Project override should be stripped
+		assert.equal(loaded.config.otlp?.endpoint, "https://user-collector.example.com");
+		assert.ok(loaded.warnings?.some((warning) => warning.includes("otlp.endpoint")));
+	} finally {
+		if (previousHome === undefined) delete process.env.PI_TEAMS_HOME;
+		else process.env.PI_TEAMS_HOME = previousHome;
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// FIX: Wildcard env vars no longer leak NPM_TOKEN, NODE_ENV, etc.
+test("child Pi does not leak NPM_TOKEN or NODE_ENV through wildcards", async () => {
+	const { buildChildPiSpawnOptions } = await import("../../src/runtime/child-pi.ts");
+	const options = buildChildPiSpawnOptions("/tmp/project", {
+		PATH: "/usr/bin",
+		HOME: "/home/user",
+		// These should NOT leak
+		NPM_TOKEN: "npm-secret-token-123",
+		NODE_ENV: "production",
+		NODE_OPTIONS: "--max-old-space-size=4096",
+		NVM_RC_VERSION: "v20.0.0",
+		LC_ALL: "en_US.UTF-8",
+		// These SHOULD be preserved
+		XDG_CONFIG_HOME: "/home/user/.config",
+		LC_CTYPE: "en_US.UTF-8",
+		NODE_PATH: "/usr/lib/node_modules",
+		NPM_CONFIG_REGISTRY: "https://registry.npmjs.org",
+	});
+	const env = options.env as Record<string, string>;
+	// Secrets should NOT leak
+	assert.equal(env.NPM_TOKEN, undefined, "NPM_TOKEN must not leak");
+	assert.equal(env.NODE_ENV, undefined, "NODE_ENV must not leak");
+	assert.equal(env.NODE_OPTIONS, undefined, "NODE_OPTIONS must not leak");
+	assert.equal(env.NVM_RC_VERSION, undefined, "NVM_RC_VERSION must not leak");
+	// Specific entries should be preserved
+	assert.equal(env.LC_ALL, "en_US.UTF-8");
+	assert.equal(env.LC_CTYPE, "en_US.UTF-8");
+	assert.equal(env.XDG_CONFIG_HOME, "/home/user/.config");
+	assert.equal(env.NODE_PATH, "/usr/lib/node_modules");
+	assert.equal(env.NPM_CONFIG_REGISTRY, "https://registry.npmjs.org");
+});

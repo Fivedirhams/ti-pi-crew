@@ -244,6 +244,15 @@ function sanitizeProjectConfig(
 			sanitized.otlp = undefined;
 		warnings.push(projectOverrideWarning(projectPath, "otlp.headers"));
 	}
+	// FIX: Block project config from setting otlp.endpoint — it controls where
+	// OTLP headers (potentially containing credentials) are sent.
+	if (config.otlp?.endpoint !== undefined) {
+		if (!sanitized.otlp) sanitized.otlp = { ...config.otlp, endpoint: undefined };
+		else sanitized.otlp = { ...sanitized.otlp, endpoint: undefined };
+		if (!Object.values(sanitized.otlp).some((entry) => entry !== undefined))
+			sanitized.otlp = undefined;
+		warnings.push(projectOverrideWarning(projectPath, "otlp.endpoint"));
+	}
 	if (
 		config.agents?.disableBuiltins !== undefined ||
 		config.agents?.overrides !== undefined
