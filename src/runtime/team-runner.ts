@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AgentConfig } from "../agents/agent-config.ts";
 import type { CrewLimitsConfig, CrewRuntimeConfig, CrewReliabilityConfig } from "../config/config.ts";
 import type { CrewRuntimeCapabilities } from "./runtime-resolver.ts";
@@ -37,6 +38,36 @@ import { clearTrackedTaskUsage } from "./usage-tracker.ts";
 import { CrewCancellationError, buildSyntheticTerminalEvidence, cancellationReasonFromSignal } from "./cancellation.ts";
 import { effectivenessPolicyDecision, evaluateRunEffectiveness, formatRunEffectivenessLines } from "./effectiveness.ts";
 import { logInternalError } from "../utils/internal-error.ts";
+
+/**
+ * Start a periodic heartbeat for the team-level run.
+ *
+ * The stale reconciler (src/runtime/stale-reconciler.ts) marks runs as failed
+ * if their heartbeat is older than `NO_PID_HEARTBEAT_STALE_MS` (5 minutes).
+ * Without this, long-running team runs (e.g. multi-phase workflows) get
+ * cancelled by the reconciler as "stale" even when they are actively
+ * executing. The team-runner has no periodic heartbeat today, so any
+ * team run lasting >5min is at risk.
+ */
+function startTeamRunHeartbeat(stateRoot: string, runId: string): () => void {
+	const heartbeatPath = path.join(stateRoot, "heartbeat.json");
+	const writeHeartbeat = (): void => {
+		try {
+			fs.writeFileSync(heartbeatPath, JSON.stringify({
+				pid: process.pid,
+				at: Date.now(),
+				runId,
+				kind: "team-runner",
+			}), "utf-8");
+		} catch {
+			// best-effort
+		}
+	};
+	writeHeartbeat();
+	const interval = setInterval(writeHeartbeat, 30_000);
+	interval.unref();
+	return () => clearInterval(interval);
+}
 
 export interface ExecuteTeamRunInput {
 	manifest: TeamRunManifest;
@@ -271,12 +302,20 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 
 	void registerRunPromise(manifest.runId);
 
+	// FIX (Round 15, regression): Start a team-level heartbeat so the stale
+	// reconciler does not cancel long-running team runs after 5 minutes
+	// (NO_PID_HEARTBEAT_STALE_MS). Previously only sub-task runners wrote
+	// heartbeats; the team-level run had no heartbeat, so any multi-phase
+	// workflow lasting >5min was marked stale and cancelled.
+	const stopTeamHeartbeat = startTeamRunHeartbeat(manifest.stateRoot, manifest.runId);
+
 	const cleanupUsage = (): void => {
 		for (const task of input.tasks) clearTrackedTaskUsage(task.id);
 	};
 
 	try {
 		const result = await executeTeamRunCore(input, manifest, workflow);
+		stopTeamHeartbeat();
 		resolveRunPromise(manifest.runId, result);
 		cleanupUsage();
 		// Terminate live agents for this run — agents are done when the run ends.
@@ -318,6 +357,7 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 		rejectRunPromise(manifest.runId, error instanceof Error ? error : new Error(message));
 		crewHooks.emit({ type: "run_failed", timestamp: new Date().toISOString(), runId: manifest.runId, data: { status: manifest.status, error: message } });
 		cleanupUsage();
+		stopTeamHeartbeat();
 		return result;
 	}
 }
