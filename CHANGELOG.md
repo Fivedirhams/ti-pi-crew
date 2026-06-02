@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.14] — Round 19 Audit Fixes (2026-06-02)
+
+### Phase 1: Path validation in checkpoint.ts (MEDIUM security)
+- All public functions now validate runId/taskId via `assertSafePathId()`:
+  - `saveCheckpoint(runId, taskId, ...)`
+  - `loadCheckpoint(runId, taskId)`
+  - `clearCheckpoint(runId, taskId)`
+  - `hasCheckpoint(runId, taskId)`
+  - `listCheckpoints(runId)`
+  - `FileCheckpointStore.save/load/delete` (validates taskId)
+- Prevents path traversal: malicious IDs like `../../../etc/passwd` throw "Invalid runId" instead of writing outside `.crew/`.
+
+### Phase 2-4: Test coverage (33 new tests)
+- 11 new tests in `test/unit/checkpoint.test.ts` (path validation)
+- 14 new tests in `test/unit/subagent-manager.test.ts` (basic + path validation)
+- 16 new tests in `test/unit/paths.test.ts` (findRepoRoot, projectPiRoot, projectCrewRoot)
+
+### Tests
+- 2370/2370 pass (was 2352 in v0.5.13; +18 net)
+- 33 new tests across 3 new test files
+- TypeScript: 0 errors
+
 ## [0.5.13] — Round 18 Audit Fixes (2026-06-02)
 
 ### Phase 1: Switch to execFileSync (HIGH security)
