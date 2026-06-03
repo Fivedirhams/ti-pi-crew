@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.5.16] — Rounds 22–31 Audit Fixes (2026-06-02)
+
+### Highlights
+- **1 bug fix**: OTLP exporter `dispose()` now awaits in-flight push (bounded by 10s timeout)
+- **269 new unit tests** across 16 previously-untested modules (Pattern #3)
+- **72 unused imports removed** across 28 source files (Pattern #6)
+- **2 defensive caps** for unbounded Maps (Pattern #2)
+- **1 L1 fix**: `console.warn` → `logInternalError` in crew-hooks
+
+### Round 22: Defensive Caps (commit 85b3be6)
+- Bounded `autoRecoveryLast` and `agentEventSeqCache` Maps to 1000 entries
+- Eviction uses insertion-order oldest-first pattern
+
+### Round 23: Resource Cleanup (commit 4be2c4e)
+- OTLP exporter `dispose()` now async, awaits in-flight push with 10s timeout
+- Surveyed all setInterval/setTimeout, process.on, file watchers, event listeners, AbortControllers — all clean
+
+### Round 24: Test Coverage — discover-agents, markers, tiered-eval (commit cfe5242)
+- 50 new tests: `sanitizeAgentSystemPrompt` (6 rules), `sanitizeGuidanceContent` (5 rules), `TieredEvalRunner` class
+
+### Round 25: Test Coverage — adaptive-plan, group-join (commit 89e1cf1)
+- 42 new tests: `slug`, `extractAdaptivePlanJson`, `parseAdaptivePlan`, `repairAdaptivePlan`, `GroupJoinManager`
+
+### Round 26: Test Coverage — pi-args, i18n (commit 3669f24)
+- 38 new tests: `applyThinkingSuffix`, `resolveCrewMaxDepth`, `t()`, `addTranslations`, `listLocales`
+
+### Round 27: Test Coverage — validation-types, live-extension-bridge (commit 44a2366)
+- 36 new tests: `validateWithSeverity` strict/lenient modes, `buildExtensionBridge` mock session
+
+### Round 28: Test Coverage — direct-run, live-session-health (commit 339ac7d)
+- 17 new tests: `isDirectRun`, `directTeamAndWorkflowFromRun`, `collectLiveSessionHealth`
+
+### Round 29: Test Coverage — process-status, task-claims (commit 405e05d)
+- 43 new tests: `checkProcessLiveness`, `isActiveRunStatus`, full claim lifecycle
+
+### Round 30: Test Coverage — task-display, green-contract, session-utils (commit 7d065ca)
+- 43 new tests: `shouldMaterializeAgent`, `taskById`, `waitingReason`, `greenLevelSatisfies`, `assertValidSessionId`
+
+### Round 31: Code Quality — unused imports + L1 fix (commit 35cc0e7)
+- 72 unused imports removed across 28 source files
+- `crew-hooks.ts`: `console.warn` → `logInternalError` for unknown event types
+
+### Stats
+- Test suite: 2657 pass + 1 skip, 0 fail (was 2370 in v0.5.14; +287 net)
+- TypeScript: 0 errors
+- New test files: 13
+- Files touched: 58
+
 ## [0.5.15] — Round 20 + 21 Audit Fixes (2026-06-02)
 
 ### Source tour
