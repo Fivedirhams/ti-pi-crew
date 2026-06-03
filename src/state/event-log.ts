@@ -66,6 +66,13 @@ let appendCounter = 0;
  *
  *  @deprecated Prefer `appendEventAsync()` for callers in async contexts. The sync lock
  *  uses `sleepSync` which blocks the event loop and prevents AbortSignal handlers from firing.
+ *
+ *  SECURITY WARNING: This function uses `sleepSync` in its lock-acquire retry loop, which
+ *  blocks the Node.js event loop for up to 120s. During that time, AbortSignal handlers
+ *  cannot fire, SIGTERM handlers are delayed, and the process appears unresponsive to
+ *  orchestrator health checks. Known callers include `appendEvent` (sync path),
+ *  `flushOneEventLogBuffer`, and `state/mailbox.ts`. Prefer the async alternative
+ *  (`appendEventAsync`) for all new code.
  */
 export function withEventLogLockSync<T>(eventsPath: string, fn: () => T): T {
 	// Ensure parent directory exists before attempting lock

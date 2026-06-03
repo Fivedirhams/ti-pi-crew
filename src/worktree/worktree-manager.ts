@@ -116,6 +116,11 @@ function runSetupHook(manifest: TeamRunManifest, task: TeamTaskState, repoRoot: 
 		logInternalError("worktree.setupHook.rejected", new Error("hook path not allowed: " + rawHookPath), `cwd=${manifest.cwd}`);
 		return [];
 	}
+	// SECURITY WARNING: Home directory hooks (~/.pi/hooks/) are user-writable and not project-scoped.
+	// A rogue npm postinstall script could place malicious hooks there. Log for visibility.
+	if (path.isAbsolute(rawHookPath)) {
+		logInternalError("worktree.setupHook.homeHook", new Error("Home directory hook used — ensure ~/.pi/hooks/ is trusted"), `hookPath=${rawHookPath}`);
+	}
 	const hookPath = path.isAbsolute(rawHookPath) ? rawHookPath : path.resolve(repoRoot, rawHookPath);
 	// SECURITY: Verify the resolved hook path is contained within the real repoRoot.
 	// This prevents symlink-based escape where repoRoot is a symlink.

@@ -181,6 +181,16 @@ export function buildChildPiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): S
 	// Bug #12 fix: essential env vars (PATH, HOME, etc.) are always preserved so child can find npm/node.
 	const filteredEnv = sanitizeEnvSecrets(env, {
 		allowList: [
+			/*
+			 * SECURITY WARNING: All model provider API keys below are passed to EVERY child worker.
+			 * If any child is compromised (e.g. via prompt injection), all listed keys are exposed.
+			 * This is a deliberate trade-off: multi-provider setups require the child Pi process to
+			 * authenticate with whichever provider the model routes to. Reducing keys per-child
+			 * would break multi-provider functionality. Mitigations:
+			 *   - sanitizeEnvSecrets strips all env vars NOT on this list.
+			 *   - Do NOT add wildcards ("*_API_KEY") — only explicit, intended provider keys.
+			 *   - Consider per-task key scoping if the architecture allows it in the future.
+			 */
 			// Model provider API keys (explicit list — do NOT use wildcards)
 			"MINIMAX_API_KEY",
 			"MINIMAX_GROUP_ID",
