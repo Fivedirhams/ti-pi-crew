@@ -4,6 +4,7 @@ import {
 	DynamicScriptRunner,
 	createScriptRunner,
 	FORBIDDEN_GLOBALS,
+	__test_executeUnchecked,
 	type ScriptValidationResult,
 	type ScriptExecutionResult,
 } from "../../src/runtime/dynamic-script-runner.ts";
@@ -216,7 +217,7 @@ test("DynamicScriptRunner returns validation errors in execution result", () => 
 test("DynamicScriptRunner executeUnchecked bypasses validation", () => {
 	const runner = new DynamicScriptRunner();
 	// executeUnchecked should still run even though the code uses Date
-	const result = runner.executeUnchecked("Date.now()");
+	const result = __test_executeUnchecked(runner, "Date.now()");
 	// Note: executeUnchecked doesn't validate, so it should succeed
 	// (the sandbox still restricts execution, but validation is skipped)
 	assert.equal(result.success, true);

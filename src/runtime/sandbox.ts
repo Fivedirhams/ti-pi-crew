@@ -18,6 +18,9 @@ const FORBIDDEN_PATTERNS = [
 	/__dirname/,                       // __dirname reference
 	/__filename/,                      // __filename reference
 	/\bdefine\s*\(/,                  // AMD define
+	// Global escape vectors
+	/\bglobalThis\b/,                 // globalThis reference
+	/\bglobal\b/,                      // global reference (Node.js)
 ] as const;
 
 /**
@@ -118,6 +121,11 @@ export class WorkflowSandbox {
 			}
 			safeGlobals[key] = value;
 		}
+
+		// Freeze prototypes before passing to sandbox context to prevent
+		// prototype pollution from sandboxed code escaping the sandbox.
+		Object.freeze(Object.prototype);
+		Object.freeze(Array.prototype);
 
 		// Context isolation - explicitly list allowed globals
 		const contextGlobals: Record<string, unknown> = {

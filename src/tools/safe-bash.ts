@@ -4,6 +4,8 @@
  * Uses linear-time scanning to prevent ReDoS attacks
  */
 
+import { logInternalError } from "../utils/internal-error.ts";
+
 
 // Backward-compatible pattern array (kept for getPatterns API)
 // IMPORTANT: Line 8 (rm pattern with nested quantifiers) has been replaced
@@ -161,6 +163,14 @@ export function isDangerous(command: string, options: SafeBashOptions = {}): str
 	const { enabled = DEFAULT_ENABLED, additionalPatterns = [], allowPatterns = [] } = options;
 
 	if (!enabled) return null;
+
+	// Reject overly permissive allowPatterns that would bypass all safety
+	for (const pattern of allowPatterns) {
+		if (pattern.source === ".*" || (pattern.test("") && pattern.test("rm -rf /"))) {
+			logInternalError("safe-bash.permissive-allow-pattern", new Error(`allowPattern rejects nothing: ${pattern}`));
+			throw new Error(`Overly permissive allowPattern rejected: ${pattern}. Use specific patterns only.`);
+		}
+	}
 
 	// Normalize: remove line continuations, collapse whitespace
 	const normalized = command.replace(/\\\n/g, " ").replace(/\s+/g, " ").trim();

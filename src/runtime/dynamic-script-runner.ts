@@ -444,8 +444,9 @@ export class DynamicScriptRunner {
 	/**
 	 * Execute a script without validation (assumes pre-validated).
 	 * Use with caution - prefer execute() for untrusted scripts.
+	 * @internal TEST ONLY — do not use in production code
 	 */
-	executeUnchecked(code: string, timeout?: number): ScriptExecutionResult {
+	private executeUnchecked(code: string, timeout?: number): ScriptExecutionResult {
 		const startTime = Date.now();
 
 		try {
@@ -479,4 +480,16 @@ export class DynamicScriptRunner {
  */
 export function createScriptRunner(options?: DynamicScriptOptions): DynamicScriptRunner {
 	return new DynamicScriptRunner(options);
+}
+
+/**
+ * @internal TEST ONLY — do not use in production code.
+ * Exposes DynamicScriptRunner.executeUnchecked for unit testing.
+ */
+export function __test_executeUnchecked(
+	runner: DynamicScriptRunner,
+	code: string,
+	timeout?: number,
+): ScriptExecutionResult {
+	return (runner as unknown as { executeUnchecked: (code: string, timeout?: number) => ScriptExecutionResult }).executeUnchecked(code, timeout);
 }

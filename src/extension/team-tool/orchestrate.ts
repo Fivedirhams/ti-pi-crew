@@ -15,6 +15,7 @@ import {
 	parsePlanDocumentSimple,
 	type OrchestratedStep,
 } from "../plan-orchestrate.ts";
+import { resolveContainedPath } from "../../utils/safe-paths.ts";
 
 /**
  * Handle the orchestrate action.
@@ -38,10 +39,17 @@ export function handleOrchestrate(
 		);
 	}
 
-	// Resolve relative paths against ctx.cwd
-	const resolvedPath = path.isAbsolute(planPath)
-		? planPath
-		: path.resolve(ctx.cwd, planPath);
+	// Resolve and validate path stays within ctx.cwd (path-traversal protection)
+	let resolvedPath: string;
+	try {
+		resolvedPath = resolveContainedPath(ctx.cwd, planPath);
+	} catch {
+		return result(
+			`planPath must be within project directory: ${planPath}`,
+			{ action: "orchestrate", status: "error" },
+			true,
+		);
+	}
 
 	if (!fs.existsSync(resolvedPath)) {
 		return result(

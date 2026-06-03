@@ -84,7 +84,7 @@ export default function safeBashExtension(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text" as const,
-							text: `🚫 ${danger}\n\nIf you need to run this command, use the regular 'bash' tool instead, but be careful!`,
+							text: `🚫 ${danger}\n\nCommand blocked by safety policy. If this is a false positive, ask the user for confirmation or use force: true with explicit user approval.`,
 						},
 					],
 				};
