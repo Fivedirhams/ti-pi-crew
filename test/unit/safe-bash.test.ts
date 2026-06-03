@@ -124,3 +124,24 @@ test("createSafeBash singleton interface", () => {
 	assert.ok(Array.isArray(patterns.dangerous));
 	assert.ok(patterns.dangerous.length > 0);
 });
+
+test("overly permissive allowPatterns are rejected", () => {
+	const safe = createSafeBash({ allowPatterns: [/.*/] });
+	assert.throws(
+		() => safe.check("echo hello"),
+		/Overly permissive allowPattern rejected/,
+	);
+});
+
+test("allowPattern matching empty string and dangerous command is rejected", () => {
+	const safe = createSafeBash({ allowPatterns: [/^.*$/] });
+	assert.throws(
+		() => safe.check("echo test"),
+		/Overly permissive allowPattern/,
+	);
+});
+
+test("specific allowPatterns are accepted", () => {
+	const safe = createSafeBash({ allowPatterns: [/\brm\s+\/tmp/] });
+	assert.ok(typeof safe.check === "function");
+});
