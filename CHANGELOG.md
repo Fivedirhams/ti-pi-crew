@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.5.17] — Security Hardening + ECC Patterns + Skill Review (2026-06-03)
+
+### Highlights
+- **3 CRITICAL security fixes**: path traversal, sandbox escape, executeUnchecked bypass
+- **3 HIGH security fixes**: allowPatterns bypass, safe-bash fallback message, mock mode
+- **3 MEDIUM security fixes**: home hooks visibility, API keys documentation, sync lock deprecation
+- **2 new features** from ECC/dmux patterns: seedPaths overlay + structured handoff template
+- **2 gap fills**: handoff parser + per-step seedPaths
+- **36 skills reviewed**: origin fields, broken refs fixed, verify-skill.ts updated
+- **1 bug fix**: adaptive-plan parser strips markdown code fences
+- **1 regression fix**: mock mode NODE_ENV gate reverted
+- **41 new tests** across 6 test files
+
+### Security Fixes
+
+#### CRITICAL
+1. `orchestrate.ts`: Path traversal — planPath validated with `resolveContainedPath()`
+2. `sandbox.ts`: Prototype pollution — `Object.freeze` on prototypes, `globalThis`/`global` in FORBIDDEN_PATTERNS
+3. `dynamic-script-runner.ts`: `executeUnchecked` → private, `__test_executeUnchecked` test-only export
+
+#### HIGH
+4. `safe-bash.ts`: allowPatterns validation rejects `/.*/` and permissive catch-all patterns
+5. `safe-bash-extension.ts`: Error message no longer suggests bypassing safe-bash
+6. `child-pi.ts`: Mock mode requires `PI_CREW_ALLOW_MOCK=1` (set in parent process only)
+
+#### MEDIUM
+7. `worktree-manager.ts`: `logInternalError` warning when home directory hooks accepted
+8. `child-pi.ts`: SECURITY WARNING JSDoc on API key allow-list trade-off
+9. `event-log.ts`: Expanded deprecation notice on `withEventLogLockSync` blocking behavior
+
+### Features (ECC/dmux patterns)
+
+- **seedPaths**: Overlay local/uncommitted files into worktrees via config (`worktree.seedPaths`) or per-step (`WorkflowStep.seedPaths`). Path traversal validation, dedup, recursive copy.
+- **Structured Handoff Template**: `HANDOFF_TEMPLATE` constant + `parseHandoffFromOutput()` parser. Agents receive handoff format instructions automatically.
+
+### Skill Review
+- All 36 skills: added `origin` YAML frontmatter field
+- Fixed `widget-rendering` wrong file path
+- Fixed `orchestration` + `detection-pipeline-design` broken cross-skill references
+- Fixed 4 skills with wrong `source/pi-mono/` paths
+- `verify-skill.ts` now validates `origin` field
+
+### Bug Fixes
+- `adaptive-plan.ts`: `stripCodeFence()` strips markdown code fences inside ADAPTIVE_PLAN markers — fixes planner output parsing for non-frontier models
+- Mock mode regression: reverted NODE_ENV gate, uses PI_CREW_ALLOW_MOCK only (child processes don't inherit NODE_ENV)
+
+### Stats
+- Test suite: 2698 pass + 1 skip, 0 fail (was 2657 in v0.5.16; +41 net)
+- TypeScript: 0 errors
+- New test files: 6 (worktree-seed-paths, task-handoff-template, task-handoff-parser, adaptive-plan +3 safe-bash tests)
+- Files touched: 50+
+- Security issues fixed: 9 (3 CRITICAL + 3 HIGH + 3 MEDIUM)
+- False positives verified: 2
+
 ## [0.5.16] — Rounds 22–31 Audit Fixes (2026-06-02)
 
 ### Highlights
