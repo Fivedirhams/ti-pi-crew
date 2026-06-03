@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.21] — Ultimate Final Sweep: HIGH Security + Correctness Fixes (2026-06-03)
+
+### Highlights
+- **safe-bash line-continuation bypass fixed** — `$\n(evil)` now blocked
+- **scheduledJobs dead code fixed** — settings sanitizer now passes through scheduled jobs
+- **Memory-bounded file reads** — `readIfSmall` uses `fs.readSync` with buffer instead of full file read
+- **Event log corruption detection** — `scanSequence` logs warnings for corrupt JSON lines
+
+### Security
+- `safe-bash.ts`: All structural checks now use `normalized` string (stripped line continuations)
+- `\$\s*\(` regex catches `$<newline>(evil)` → `$(evil)` bypass that bash interprets as command substitution
+- Added 2 regression tests for line-continuation bypass
+
+### Fixes
+- `settings-store.ts`: `sanitizeSettings()` now copies `scheduledJobs` as opaque array
+- `task-output-context.ts`: `readIfSmall` uses `Buffer.alloc` + `fs.readSync` instead of `readFileSync` + `slice`
+- `event-log.ts`: `scanSequence` counts and logs corrupt JSON lines via `logInternalError`
+
+### Stats
+- Test suite: 2703 pass + 1 skip, 0 fail
+- TypeScript: 0 errors
+- Total issues fixed across 37 rounds: ~155+
+
 ## [0.5.20] — Verification Sweep: 7 Fixes (2026-06-03)
 
 ### Highlights
