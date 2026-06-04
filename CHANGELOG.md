@@ -1401,3 +1401,37 @@ correctness+error-handling, and performance+architecture audits across 77 source
 
 ### CI
 - `.github/workflows/ci.yml`: typecheck step re-enabled (was disabled since v0.3.x)
+
+## [0.6.0] — Source Tour Patterns Implementation (2026-06-04)
+
+### Highlights
+- **15 patterns** implemented from 63-repo source tour (2,267 LOC)
+- All patterns pass TypeScript strict mode with 0 errors
+- 37 skills (including new council skill)
+
+### Tier 1 — Quick Wins
+- **Council skill** (Pattern 5): 3 adversarial roles for critical decisions
+- **6 lifecycle hooks** (Pattern 12): after_run_complete, after_task_complete, session hooks
+- **3-tier convention** (Pattern 13): Command→Agent→Skill documentation + effort field
+- **Pre-step scripts** (Pattern 2): Deterministic scripts before LLM dispatch
+- **Chain DSL parser** (Pattern 8): step1 -> parallel(step2, step3) -> step4
+
+### Tier 2 — Medium-Term
+- **DAG enhancements** (Pattern 7): findBlockedTasks, getBlockingTasks, topologicalSort
+- **Drift detection** (Pattern 10): 5 detectors, 2-pass reconciliation
+- **Hash-based task IDs** (Pattern 11): Base36 + adaptive length + hierarchical
+- **Iterative retrieval** (Pattern 6): Score → converge → refine loop
+- **Intercom bridge** (Pattern 9): Worker→orchestrator escalation queue
+- **Plan templates** (Pattern 15): Built-in standard-review and full-implementation
+
+### Tier 3 — Long-Term
+- **Phase-gated intermediates** (Pattern 1): Disk-persistent step outputs
+- **Incremental fingerprinting** (Pattern 3): Content hash + structural signature
+- **4-tier memory** (Pattern 4): Working→Episodic→Semantic→Procedural with Ebbinghaus decay
+- **Observation system** (Pattern 14): Capture→compress→re-inject with privacy tags
+
+### Stats
+- Test suite: 2698 pass + 1 skip, 0 fail
+- TypeScript: 0 errors
+- Skills: 37/37 PASS
+- New modules: 11 files, 2,267 LOC
