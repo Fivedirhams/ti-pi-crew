@@ -38,35 +38,54 @@ export interface PhaseGateBundle {
  * Sequential enforcement: each phase must pass before proceeding.
  */
 export const NPM_TYPESCRIPT_GATES: Array<{ name: string; command: string; critical: boolean }> = [
-	{ name: "build", command: "npm run build 2>&1 || true", critical: true },
-	{ name: "typecheck", command: "npx tsc --noEmit 2>&1 || true", critical: true },
-	{ name: "lint", command: "npm run lint 2>&1 || true", critical: false },
-	{ name: "tests", command: "npm test 2>&1 || true", critical: true },
+	{ name: "build", command: "npm run build 2>&1", critical: true },
+	{ name: "typecheck", command: "npx tsc --noEmit 2>&1", critical: true },
+	{ name: "lint", command: "npm run lint 2>&1", critical: false },
+	{ name: "tests", command: "npm test 2>&1", critical: true },
 ];
 
 /**
  * Cargo/Rust project phase gates.
  */
 export const CARGO_RUST_GATES: Array<{ name: string; command: string; critical: boolean }> = [
-	{ name: "check", command: "cargo check 2>&1 || true", critical: true },
-	{ name: "test", command: "cargo test 2>&1 || true", critical: true },
-	{ name: "clippy", command: "cargo clippy 2>&1 || true", critical: false },
+	{ name: "check", command: "cargo check 2>&1", critical: true },
+	{ name: "test", command: "cargo test 2>&1", critical: true },
+	{ name: "clippy", command: "cargo clippy 2>&1", critical: false },
 ];
 
 /**
  * Execute a single command and capture output.
  */
+/** Characters/patterns that indicate dangerous shell metacharacters. */
+const DANGEROUS_SHELL_PATTERNS = /(?:;|&&|\|\||\$\(|`|\$\{|\b(eval|exec)\b|>|>>|<)/;
+
+/**
+ * Validate a verification gate command is safe to execute.
+ * Rejects commands with shell metacharacters that could enable injection.
+ * Allows: pipes (|), redirection of stderr (2>&1), and basic npm/cargo/npx commands.
+ */
+function validateGateCommand(command: string): void {
+	const normalized = command.replace(/\\\n/g, " ").trim();
+	if (DANGEROUS_SHELL_PATTERNS.test(normalized)) {
+		throw new Error(
+			`Security: verification gate command rejected (dangerous shell pattern): ${command}`,
+		);
+	}
+}
+
 async function executeCommand(
 	command: string,
 	cwd: string,
 	timeoutMs: number = 120000,
 ): Promise<{ exitCode: number | null; output: string; durationMs: number }> {
+	// SECURITY: Validate command before shell execution to prevent injection.
+	validateGateCommand(command);
+
 	const start = Date.now();
 	let output = "";
 	let exitCode: number | null = null;
 
 	return new Promise((resolve) => {
-		// Use shell to handle compound commands
 		const shell = spawn("sh", ["-c", command], {
 			cwd,
 			timeout: timeoutMs,

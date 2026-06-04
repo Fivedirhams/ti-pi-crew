@@ -11,6 +11,8 @@
  */
 
 import type { HandoffSummary, HandoffManager, TaskPacket, TaskResult } from "./handoff-manager.ts";
+import { parseChainDSL } from "./chain-parser.ts";
+import type { ChainStep as DSLChainStep } from "./chain-parser.ts";
 
 /**
  * Single step in a chain.
@@ -123,10 +125,25 @@ export class ChainRunner {
 	 * parseChain('"Research AI trends" -> "Analyze findings"')
 	 * parseChain("@step1 --model claude-opus-3 -> @step2")
 	 * 
+	 * Also supports DSL syntax from chain-parser for advanced constructs:
+	 * parseChain("step1 -> parallel(step2, step3) -> step4")
+	 * parseChain("step1:3 -> step2 --with-context -> step3")
+	 * 
 	 * @param chainString - The chain string to parse
 	 * @returns Parsed chain specification
 	 */
 	parseChain(chainString: string): ChainSpec {
+		// Try DSL parser first for advanced syntax (parallel groups, loop counts, flags)
+		// Falls back to the simple split parser if DSL parsing fails
+		if (this.hasDSLConstructs(chainString)) {
+			try {
+				const dslSteps = parseChainDSL(chainString);
+				return this.dslToChainSpec(dslSteps, chainString);
+			} catch {
+				// DSL parse failed; fall through to simple parser
+			}
+		}
+
 		const stepStrings = chainString.split("->").map(s => s.trim());
 
 		const steps: ChainStep[] = stepStrings.map((step, index) => {
@@ -335,6 +352,47 @@ export class ChainRunner {
 		}
 
 		return parsed;
+	}
+
+	/**
+	 * Detect if chainString uses DSL constructs that require chain-parser.
+	 * DSL features: parallel(...), :loopCount, --with-context flag
+	 */
+	private hasDSLConstructs(chainString: string): boolean {
+		return /\bparallel\s*\(/.test(chainString) ||
+			/\w+:\d+\b/.test(chainString) ||
+			/--with-context/.test(chainString);
+	}
+
+	/**
+	 * Convert DSL AST steps (from chain-parser) to ChainSpec.
+	 */
+	private dslToChainSpec(dslSteps: DSLChainStep[], chainString: string): ChainSpec {
+		const steps: ChainStep[] = dslSteps.map((dslStep, index) => {
+			// For parallel groups, use a synthetic step name
+			if (dslStep.parallel) {
+				return {
+					name: dslStep.name,
+					context: {
+						parallel: dslStep.parallel.map(p => ({ name: p.name, loopCount: p.loopCount, withContext: p.withContext, args: p.args })),
+					},
+					loopCount: dslStep.loopCount,
+				};
+			}
+			const step: ChainStep = { name: dslStep.name };
+			if (dslStep.loopCount) step.context = { ...step.context, loopCount: dslStep.loopCount };
+			if (dslStep.withContext) step.context = { ...step.context, withContext: true };
+			if (dslStep.args && dslStep.args.length > 0) step.context = { ...step.context, args: dslStep.args };
+			return step;
+		});
+
+		// Extract global overrides using existing logic
+		const globalModel = this.extractGlobalFlag(chainString, "global-model");
+		const globalSkill = this.extractGlobalFlag(chainString, "global-skill");
+		const globalThinking = this.extractGlobalFlag(chainString, "global-thinking") as "fast" | "standard" | "deep" | undefined;
+		const continueOnError = this.extractGlobalFlag(chainString, "continue-on-error") === "true";
+
+		return { steps, globalModel, globalSkill, globalThinking, continueOnError };
 	}
 
 	/**

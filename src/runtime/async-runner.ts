@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { logInternalError } from "../utils/internal-error.ts";
 import { appendEvent } from "../state/event-log.ts";
+import { sanitizeEnvSecrets } from "../utils/env-filter.ts";
 import type { TeamRunManifest } from "../state/types.ts";
 
 
@@ -131,8 +132,62 @@ export async function spawnBackgroundTeamRun(manifest: TeamRunManifest): Promise
 	const logPath = path.join(manifest.stateRoot, "background.log");
 	fs.mkdirSync(manifest.stateRoot, { recursive: true });
 
-	// NOTE: Do NOT set PI_CREW_PARENT_PID for the background runner.
-	const { PI_CREW_PARENT_PID: _, ...envWithoutParentPid } = process.env;
+	// SECURITY FIX: Use sanitizeEnvSecrets with same allow-list as child-pi.ts
+	// to prevent leaking all env vars (including secrets) to detached background runner.
+	// Previously, destructuring only removed PI_CREW_PARENT_PID but kept everything else.
+	const filteredEnv = sanitizeEnvSecrets(process.env, {
+		allowList: [
+			// Model provider API keys (same as child-pi.ts)
+			"MINIMAX_API_KEY",
+			"MINIMAX_GROUP_ID",
+			"OPENAI_API_KEY",
+			"OPENAI_ORG_ID",
+			"ANTHROPIC_API_KEY",
+			"GOOGLE_API_KEY",
+			"GOOGLE_GENERATIVE_LANGUAGE_API_KEY",
+			"AZURE_OPENAI_API_KEY",
+			"AZURE_OPENAI_ENDPOINT",
+			"AWS_ACCESS_KEY_ID",
+			"AWS_SECRET_ACCESS_KEY",
+			"AWS_REGION",
+			"ZEU_API_KEY",
+			"ZERODEV_API_KEY",
+			// Essential non-secret vars
+			"PATH",
+			"HOME",
+			"USER",
+			"SHELL",
+			"TERM",
+			"LANG",
+			"LC_ALL",
+			"LC_COLLATE",
+			"LC_CTYPE",
+			"LC_MESSAGES",
+			"LC_MONETARY",
+			"LC_NUMERIC",
+			"LC_TIME",
+			"XDG_CONFIG_HOME",
+			"XDG_DATA_HOME",
+			"XDG_CACHE_HOME",
+			"XDG_RUNTIME_DIR",
+			"NVM_BIN",
+			"NVM_DIR",
+			"NVM_INC",
+			"NODE_PATH",
+			"NODE_DISABLE_COLORS",
+			"NODE_EXTRA_CA_CERTS",
+			"NPM_CONFIG_REGISTRY",
+			"NPM_CONFIG_USERCONFIG",
+			"NPM_CONFIG_GLOBALCONFIG",
+			"PI_*",
+			"PI_CREW_*",
+			"PI_TEAMS_*",
+		],
+	});
+	// Block execution control vars from leaking
+	delete filteredEnv.PI_CREW_PARENT_PID;
+	delete filteredEnv.PI_CREW_EXECUTE_WORKERS;
+	delete filteredEnv.PI_TEAMS_EXECUTE_WORKERS;
 
 	const loader = resolveTypeScriptLoader();
 	if (!loader) {
@@ -159,7 +214,7 @@ export async function spawnBackgroundTeamRun(manifest: TeamRunManifest): Promise
 		detached: true,
 		setsid: true,
 		stdio: ["ignore", "pipe", "pipe"],
-		env: envWithoutParentPid,
+		env: filteredEnv,
 		windowsHide: true,
 	} as unknown as Parameters<typeof spawn>[2];
 	const child = spawn(process.execPath, command.args, spawnOpts);

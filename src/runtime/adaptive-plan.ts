@@ -22,6 +22,7 @@ import type { TeamConfig } from "../teams/team-config.ts";
 import type { WorkflowConfig, WorkflowStep } from "../workflows/workflow-config.ts";
 import type { TeamRunManifest, TeamTaskState } from "../state/types.ts";
 import { refreshTaskGraphQueues } from "./task-graph-scheduler.ts";
+import { getPlanTemplate, renderPlanTemplate, listPlanTemplates } from "./plan-templates.ts";
 
 export interface AdaptivePlanTask {
 	role: string;
@@ -70,6 +71,29 @@ export function extractAdaptivePlanJson(text: string): string | undefined {
 }
 
 export function parseAdaptivePlan(text: string, allowedRoles: string[]): AdaptivePlan | undefined {
+	// Check if the text is a plan template reference: "template:<name>" with optional JSON variables
+	const templateRefMatch = text.match(/^template:([a-zA-Z0-9_-]+)/);
+	if (templateRefMatch?.[1]) {
+		const template = getPlanTemplate(templateRefMatch[1]);
+		if (template) {
+			// Try to extract variables from the remaining text
+			let variables: Record<string, string> = {};
+			try {
+				const varsJson = text.slice(templateRefMatch[0].length).trim();
+				if (varsJson) variables = JSON.parse(varsJson);
+			} catch { /* use empty variables */ }
+			const rendered = renderPlanTemplate(templateRefMatch[1], variables);
+			if (rendered) {
+				// Convert RenderedPlan → AdaptivePlan
+				const phases: AdaptivePlanPhase[] = rendered.phases.map(phase => ({
+					name: phase.name,
+					tasks: [{ role: phase.role, task: phase.task }],
+				}));
+				return phases.length ? { phases } : undefined;
+			}
+		}
+	}
+
 	const raw = extractAdaptivePlanJson(text);
 	if (!raw) return undefined;
 	let parsed: unknown;

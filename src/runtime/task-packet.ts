@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import type { TeamRunManifest, TaskPacket, TaskScope, VerificationContract } from "../state/types.ts";
 import type { WorkflowStep } from "../workflows/workflow-config.ts";
+import { generateTaskHashId } from "./task-id.ts";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SEC-007 Fix: Workflow Step Task Sanitization
@@ -81,6 +82,16 @@ export function buildTaskPacket(input: BuildTaskPacketInput): TaskPacket {
 	const scopePath = reads.length === 1 ? reads[0] : reads.length > 1 ? reads.join(", ") : undefined;
 	// SEC-007: Sanitize task text before inserting into task packet
 	const sanitizedTask = sanitizeTaskText(input.step.task);
+
+	// Generate a deterministic hash-based task ID for traceability and logging.
+	// Uses goal + step ID + run ID as content parts.
+	// TODO: Once TaskPacket type gains a hashId field, include this in the packet.
+	const _taskHashId = generateTaskHashId([
+		input.manifest.goal,
+		input.step.id,
+		input.manifest.runId,
+	]);
+
 	return {
 		objective: sanitizedTask.replaceAll("{goal}", input.manifest.goal),
 		scope,
