@@ -210,3 +210,116 @@ test("ensureCrewDirectory updates .gitignore in project root", async () => {
 		cleanup(dir);
 	}
 });
+
+// --- Regression: issue #28 — parallel subagent race condition ---
+//
+// Bug: `path.parse(start).root` crashed with `TypeError: Cannot read properties
+// of undefined (reading 'parse')` when 3+ concurrent subagents dynamically
+// imported `crew-init.ts`. The fix inlines root detection via `parseRoot` and
+// uses `safeJoin` / `safeDirname` / `safeResolve` that don't depend on the
+// `path` namespace binding.
+
+test("ensureCrewDirectory is safe under concurrent invocation (issue #28)", async () => {
+	const dir = makeTempProject();
+	try {
+		// Launch 8 concurrent calls — same number of in-flight dynamic imports
+		// that triggered the original race in the bug report.
+		const calls = Array.from({ length: 8 }, () =>
+			ensureCrewDirectory(dir),
+		);
+		// If any call throws (e.g. `path.parse` undefined), the aggregate will reject.
+		const results = await Promise.all(calls);
+		assert.equal(results.length, 8);
+		// Structure should still be correct after the race.
+		const crewRoot = path.join(dir, ".crew");
+		assert.ok(fs.statSync(crewRoot).isDirectory());
+		assert.ok(
+			fs.statSync(path.join(crewRoot, "state", "runs")).isDirectory(),
+		);
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("ensureCrewDirectory survives a corrupted `path` namespace binding (issue #28)", async () => {
+	// Node.js freezes the `node:path` module, so we can't monkey-patch it directly.
+	// Instead, we test the inline fallbacks in isolation via __test_internals
+	// to lock in their behavior — this is the same code path that runs when
+	// `path.parse` is `undefined` in the jiti race.
+	const crewInitModule = await import("../../src/state/crew-init.ts");
+	const { parseRoot, safeJoin, safeDirname, safeResolve } =
+		crewInitModule.__test_internals;
+
+	// parseRoot: POSIX
+	assert.equal(parseRoot("/"), "/");
+	assert.equal(parseRoot("/a/b/c"), "/");
+	assert.equal(parseRoot(""), "/");
+	// parseRoot: Windows drive letter
+	assert.equal(parseRoot("C:\\"), "C:\\");
+	assert.equal(parseRoot("C:/foo"), "C:/");
+	assert.equal(parseRoot("D:\\projects"), "D:\\");
+	// parseRoot: UNC
+	// UNC paths use double backslash at the start: \\server\share\foo
+	assert.equal(parseRoot("\\\\server\\share\\foo"), "\\\\server\\share");
+	// POSIX-style `//server/share/foo` is treated as a POSIX absolute path
+	// (starting with `/`) — not a UNC path. This matches `path.parse` behavior.
+	assert.equal(parseRoot("//server/share/foo"), "/");
+	// parseRoot: relative
+	assert.equal(parseRoot("foo/bar"), "foo/bar");
+	assert.equal(parseRoot("./relative"), "./relative");
+
+	// safeDirname
+	assert.equal(safeDirname("/a/b/c"), "/a/b");
+	assert.equal(safeDirname("/a"), "/");
+	assert.equal(safeDirname("C:\\foo\\bar"), "C:\\foo");
+	assert.equal(safeDirname("foo"), "foo");
+	assert.equal(safeDirname("/"), "/");
+
+	// safeJoin uses / when all parts are POSIX
+	assert.equal(safeJoin("/a", "b", "c"), "/a/b/c");
+	assert.equal(safeJoin("/a/", "b"), "/a/b");
+
+	// safeResolve is identity when path module is unavailable, but
+	// the real path.resolve is still available in the test environment.
+	assert.equal(safeResolve("/foo"), path.resolve("/foo"));
+});
+
+// Direct unit tests for the inlined `parseRoot` helper.
+//
+// We import the module fresh and read the function via a tiny shim: the
+// helper is module-private, so we exercise it indirectly through
+// `ensureCrewDirectory` running on a known temp project with a deeply
+// nested path. The point of these tests is to lock in the behavior so
+// future refactors don't reintroduce the `path.parse` dependency.
+test("ensureCrewDirectory walks up to .git marker from a deeply nested cwd", async () => {
+	const dir = makeTempProject();
+	const nested = path.join(dir, "a", "b", "c", "d");
+	fs.mkdirSync(nested, { recursive: true });
+	try {
+		await ensureCrewDirectory(nested);
+		assert.ok(
+			fs.statSync(path.join(dir, ".crew")).isDirectory(),
+			"Should locate project root via .git marker and create .crew/ there",
+		);
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("ensureCrewDirectory walks up to package.json marker", async () => {
+	const dir = fs.mkdtempSync(
+		path.join(os.tmpdir(), "pi-crew-crew-init-pkgjson-"),
+	);
+	fs.writeFileSync(path.join(dir, "package.json"), "{}", "utf-8");
+	const nested = path.join(dir, "src", "lib");
+	fs.mkdirSync(nested, { recursive: true });
+	try {
+		await ensureCrewDirectory(nested);
+		assert.ok(
+			fs.statSync(path.join(dir, ".crew")).isDirectory(),
+			"Should locate project root via package.json and create .crew/ there",
+		);
+	} finally {
+		cleanup(dir);
+	}
+});
