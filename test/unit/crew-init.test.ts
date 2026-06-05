@@ -1,5 +1,26 @@
 /**
  * Tests for P0: Auto-setup .crew directory and .gitignore.
+ *
+ * ── F-6 documentation (post-issue-#28 review, commit e95e055) ────────────
+ * Issue #28's fix targets `crew-init.ts` because it is the top of an
+ * `await import()` chain in jiti. The fix removes the runtime dependency
+ * on the `path` namespace binding by inlining `parseRoot`, `safeJoin`,
+ * `safeDirname`, and `safeResolve`.
+ *
+ * A natural follow-up question: does `src/runtime/async-runner.ts` have
+ * the same problem? It uses `path.resolve`, `path.parse`, `path.join`,
+ * and `path.dirname` directly (lines 37, 41, 131–132). The answer is NO:
+ * `async-runner.ts` is reached via the *static* re-export chain
+ * `src/subagents/async-entry.ts` → `src/extension/team-tool/run.ts` and
+ * `src/extension/team-tool/parallel-dispatch.ts`. jiti's namespace race
+ * only affects the top of an `await import()` chain. Static imports are
+ * resolved when the module is first loaded by jiti, well before any
+ * concurrent dynamic-import activity. Therefore `async-runner.ts` does
+ * not need the same treatment.
+ *
+ * If a future refactor ever moves `async-runner.ts` behind a dynamic
+ * `import()` in a concurrent code path, this file's F-2 and F-3
+ * regression tests should be re-applied to it.
  */
 
 import assert from "node:assert/strict";
@@ -291,6 +312,14 @@ test("ensureCrewDirectory survives a corrupted `path` namespace binding (issue #
 	assert.equal(safeJoin("a\\\\b", "c"), "a\\b\\c");
 	// safeJoin — empty parts filter
 	assert.equal(safeJoin("/a", "", "b"), "/a/b");
+	// safeJoin — trailing separator in part is stripped (F-8 regression).
+	// This prevents `safeJoin("/", "foo")` → `"//foo"` (double slash) which
+	// could be misinterpreted as a UNC path on POSIX tools.
+	assert.equal(safeJoin("/", "foo"), "/foo");
+	assert.equal(safeJoin("\\\\", "foo"), "\\\\foo");
+	// safeJoin — multiple trailing separators
+	assert.equal(safeJoin("/a//", "b"), "/a/b");
+	assert.equal(safeJoin("/a/", "/b"), "/a/b");
 
 	// safeResolve: identity when path module is unavailable, but
 	// the real path.resolve is still available in the test environment.

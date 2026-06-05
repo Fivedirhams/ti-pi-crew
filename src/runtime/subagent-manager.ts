@@ -406,8 +406,6 @@ export class SubagentManager {
 		})();
 		// Defense in depth (issue #29): a subagent failure should never crash
 		// the host pi process. The IIFE above can reject (e.g. when a run
-		// Defense in depth (issue #29): a subagent failure should never crash
-		// the host pi process. The IIFE above can reject (e.g. when a run
 		// lookup fails) and the re-throw at line 281 propagates to
 		// `record.promise`. If no caller awaits the promise, that rejection
 		// would become `unhandledRejection` → `uncaughtException` → pi exits.

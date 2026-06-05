@@ -1,16 +1,16 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, unlinkSync, mkdirSync, rmSync } from "fs";
+import test from "node:test";
+import { existsSync, mkdirSync, rmSync, unlinkSync } from "fs";
 import { join } from "path";
 import {
-	initLedger,
 	appendEntry,
-	getLedger,
-	getLatestDecision,
-	summarizeLedger,
-	promoteCandidate,
 	decayCandidate,
+	getLatestDecision,
+	getLedger,
+	initLedger,
+	promoteCandidate,
 	type RolloutEntry,
+	summarizeLedger,
 } from "../../src/state/decision-ledger.ts";
 
 function cleanupRun(runId: string) {
@@ -20,13 +20,77 @@ function cleanupRun(runId: string) {
 	}
 }
 
+// ── Security regression (post-issue-#29 review) ────────────────────────
+// `initLedger`, `appendEntry`, etc. accept `runId` as a string and use
+// it directly in path computation. The fix in commit <this> adds
+// `assertSafePathId("runId", runId)` to each exported function to
+// prevent path-traversal. These tests verify the guard fires.
+test("decision-ledger: initLedger rejects path-traversal runId", () => {
+	assert.throws(() => initLedger("../../../tmp/pwned"), /Invalid runId/);
+});
+
+test("decision-ledger: appendEntry rejects path-traversal runId", () => {
+	const entry = {
+		rolloutId: "x",
+		timestamp: new Date().toISOString(),
+		searchSpace: "test",
+		trialCount: 0,
+		topCandidates: [],
+		decisionMark: "accept" as const,
+		coherenceMark: {
+			matchesPrior: true,
+			matchesRecursive: true,
+			promotionAllowed: true,
+			reason: "test",
+		},
+	} as unknown as RolloutEntry;
+	assert.throws(() => appendEntry("../escape", entry), /Invalid runId/);
+});
+
+test("decision-ledger: getLedger rejects path-traversal runId", () => {
+	assert.throws(() => getLedger("../../etc/passwd"), /Invalid runId/);
+});
+
+test("decision-ledger: getLatestDecision rejects path-traversal runId", () => {
+	assert.throws(() => getLatestDecision(".."), /Invalid runId/);
+});
+
+test("decision-ledger: summarizeLedger rejects path-traversal runId", () => {
+	assert.throws(() => summarizeLedger("."), /Invalid runId/);
+});
+
+test("decision-ledger: promoteCandidate rejects path-traversal inputs", () => {
+	assert.throws(
+		() => promoteCandidate("../escape", "../../etc"),
+		/Invalid runId/,
+	);
+	assert.throws(
+		() => promoteCandidate("valid-id", "../bad"),
+		/Invalid candidate/,
+	);
+});
+
+test("decision-ledger: decayCandidate rejects path-traversal inputs", () => {
+	assert.throws(
+		() => decayCandidate("../escape", "../../etc"),
+		/Invalid runId/,
+	);
+	assert.throws(
+		() => decayCandidate("valid-id", "../bad"),
+		/Invalid candidate/,
+	);
+});
+
 test("decision-ledger: initLedger creates directory and file", () => {
 	const runId = "test-init-" + Date.now();
 	cleanupRun(runId);
 
 	initLedger(runId);
 
-	const ledgerPath = join(process.cwd(), `.crew/state/runs/${runId}/decision-ledger.jsonl`);
+	const ledgerPath = join(
+		process.cwd(),
+		`.crew/state/runs/${runId}/decision-ledger.jsonl`,
+	);
 	assert.ok(existsSync(ledgerPath), "Ledger file should exist");
 
 	cleanupRun(runId);
@@ -72,7 +136,12 @@ test("decision-ledger: coherence marks are auto-computed on append", () => {
 		trialCount: 1,
 		topCandidates: ["claude-3-5-sonnet"],
 		decisionMark: "accept",
-		coherenceMark: { matchesPrior: false, matchesRecursive: false, promotionAllowed: false, reason: "placeholder" },
+		coherenceMark: {
+			matchesPrior: false,
+			matchesRecursive: false,
+			promotionAllowed: false,
+			reason: "placeholder",
+		},
 	};
 	appendEntry(runId, entry1);
 
@@ -85,13 +154,26 @@ test("decision-ledger: coherence marks are auto-computed on append", () => {
 		trialCount: 2,
 		topCandidates: ["claude-3-5-sonnet", "gpt-4o"],
 		decisionMark: "accept",
-		coherenceMark: { matchesPrior: false, matchesRecursive: false, promotionAllowed: false, reason: "placeholder" },
+		coherenceMark: {
+			matchesPrior: false,
+			matchesRecursive: false,
+			promotionAllowed: false,
+			reason: "placeholder",
+		},
 	};
 	appendEntry(runId, entry2);
 
 	const ledger = getLedger(runId);
-	assert.strictEqual(ledger[1].coherenceMark.matchesPrior, true, "Second entry should match prior");
-	assert.strictEqual(ledger[1].coherenceMark.promotionAllowed, true, "Second entry should have promotion allowed");
+	assert.strictEqual(
+		ledger[1].coherenceMark.matchesPrior,
+		true,
+		"Second entry should match prior",
+	);
+	assert.strictEqual(
+		ledger[1].coherenceMark.promotionAllowed,
+		true,
+		"Second entry should have promotion allowed",
+	);
 
 	cleanupRun(runId);
 });
@@ -120,15 +202,28 @@ test("decision-ledger: getLatestDecision returns most recent entry", () => {
 			trialCount: i,
 			topCandidates: [`candidate-${i}`],
 			decisionMark: i === 1 ? "accept" : i === 2 ? "watch" : "reject",
-			coherenceMark: { matchesPrior: false, matchesRecursive: false, promotionAllowed: true, reason: "test" },
+			coherenceMark: {
+				matchesPrior: false,
+				matchesRecursive: false,
+				promotionAllowed: true,
+				reason: "test",
+			},
 		};
 		appendEntry(runId, entry);
 	}
 
 	const latest = getLatestDecision(runId);
 	assert.ok(latest !== null, "Should return an entry");
-	assert.strictEqual(latest!.rolloutId, "rollout-3", "Should be the third entry");
-	assert.strictEqual(latest!.decisionMark, "reject", "Should have reject decision");
+	assert.strictEqual(
+		latest!.rolloutId,
+		"rollout-3",
+		"Should be the third entry",
+	);
+	assert.strictEqual(
+		latest!.decisionMark,
+		"reject",
+		"Should have reject decision",
+	);
 
 	cleanupRun(runId);
 });
@@ -140,7 +235,10 @@ test("decision-ledger: summarizeLedger returns message for empty ledger", () => 
 	initLedger(runId);
 
 	const summary = summarizeLedger(runId);
-	assert.ok(summary.includes("No entries recorded yet"), "Should mention no entries");
+	assert.ok(
+		summary.includes("No entries recorded yet"),
+		"Should mention no entries",
+	);
 
 	cleanupRun(runId);
 });
@@ -167,9 +265,15 @@ test("decision-ledger: summarizeLedger generates markdown summary", () => {
 	appendEntry(runId, entry);
 
 	const summary = summarizeLedger(runId);
-	assert.ok(summary.includes("# Decision Ledger Summary"), "Should have markdown header");
+	assert.ok(
+		summary.includes("# Decision Ledger Summary"),
+		"Should have markdown header",
+	);
 	assert.ok(summary.includes("rollout-1"), "Should include rollout ID");
-	assert.ok(summary.includes("model-selection"), "Should include search space");
+	assert.ok(
+		summary.includes("model-selection"),
+		"Should include search space",
+	);
 	assert.ok(summary.includes("Accept"), "Should include decision mark");
 
 	cleanupRun(runId);
@@ -181,9 +285,20 @@ test("decision-ledger: promoteCandidate creates accept entry", () => {
 
 	const entry = promoteCandidate(runId, "new-candidate");
 
-	assert.strictEqual(entry.decisionMark, "accept", "Should have accept decision");
-	assert.ok(entry.topCandidates.includes("new-candidate"), "Should include promoted candidate");
-	assert.strictEqual(entry.coherenceMark.promotionAllowed, true, "Should have promotion allowed");
+	assert.strictEqual(
+		entry.decisionMark,
+		"accept",
+		"Should have accept decision",
+	);
+	assert.ok(
+		entry.topCandidates.includes("new-candidate"),
+		"Should include promoted candidate",
+	);
+	assert.strictEqual(
+		entry.coherenceMark.promotionAllowed,
+		true,
+		"Should have promotion allowed",
+	);
 
 	cleanupRun(runId);
 });
@@ -194,9 +309,20 @@ test("decision-ledger: decayCandidate creates decay entry", () => {
 
 	const entry = decayCandidate(runId, "old-candidate");
 
-	assert.strictEqual(entry.decisionMark, "decay", "Should have decay decision");
-	assert.ok(entry.topCandidates.includes("old-candidate"), "Should include decayed candidate");
-	assert.strictEqual(entry.coherenceMark.promotionAllowed, false, "Manual decay should not allow promotion");
+	assert.strictEqual(
+		entry.decisionMark,
+		"decay",
+		"Should have decay decision",
+	);
+	assert.ok(
+		entry.topCandidates.includes("old-candidate"),
+		"Should include decayed candidate",
+	);
+	assert.strictEqual(
+		entry.coherenceMark.promotionAllowed,
+		false,
+		"Manual decay should not allow promotion",
+	);
 
 	cleanupRun(runId);
 });
@@ -214,7 +340,12 @@ test("decision-ledger: recursive pattern detection works", () => {
 			trialCount: i,
 			topCandidates: ["stable-candidate"],
 			decisionMark: "accept",
-			coherenceMark: { matchesPrior: false, matchesRecursive: false, promotionAllowed: false, reason: "placeholder" },
+			coherenceMark: {
+				matchesPrior: false,
+				matchesRecursive: false,
+				promotionAllowed: false,
+				reason: "placeholder",
+			},
 		};
 		appendEntry(runId, entry);
 	}
@@ -227,13 +358,26 @@ test("decision-ledger: recursive pattern detection works", () => {
 		trialCount: 4,
 		topCandidates: ["new-candidate"],
 		decisionMark: "accept",
-		coherenceMark: { matchesPrior: false, matchesRecursive: false, promotionAllowed: false, reason: "placeholder" },
+		coherenceMark: {
+			matchesPrior: false,
+			matchesRecursive: false,
+			promotionAllowed: false,
+			reason: "placeholder",
+		},
 	};
 	appendEntry(runId, entry4);
 
 	const ledger = getLedger(runId);
-	assert.strictEqual(ledger[3].coherenceMark.matchesRecursive, true, "4th entry should match recursive pattern");
-	assert.strictEqual(ledger[3].coherenceMark.promotionAllowed, true, "4th entry should have promotion allowed");
+	assert.strictEqual(
+		ledger[3].coherenceMark.matchesRecursive,
+		true,
+		"4th entry should match recursive pattern",
+	);
+	assert.strictEqual(
+		ledger[3].coherenceMark.promotionAllowed,
+		true,
+		"4th entry should have promotion allowed",
+	);
 
 	cleanupRun(runId);
 });

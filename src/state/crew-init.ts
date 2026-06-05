@@ -111,22 +111,32 @@ function safeJoin(...parts: string[]): string {
 	const filtered = parts.filter(Boolean);
 	if (filtered.length === 0) return "";
 	const sep = filtered.some((p) => p.includes("\\")) ? "\\" : "/";
-	const joined = filtered.join(sep);
-	// Collapse runs of the separator, but preserve a leading UNC double-separator
-	// ("\\\\server\\share" stays as-is, not "\\server\\share"). F-1 in the
-	// post-fix review.
+	// Detect if the first part begins with a leading separator (or UNC "\\\\")
+	// so we can preserve it. F-8: collapses runs of the separator everywhere
+	// (including the body), but re-prepends the leading separator that the
+	// collapse regex would otherwise eat.
+	const firstPart = filtered[0];
+	let leading = "";
 	if (sep === "\\") {
-		const leading = joined.startsWith("\\\\")
-			? "\\\\"
-			: joined[0] === "\\"
-				? "\\"
-				: "";
-		const body = joined.slice(leading.length);
-		return leading + body.replace(/\\{2,}/g, "\\");
+		if (firstPart.startsWith("\\\\")) leading = "\\\\";
+		else if (firstPart.startsWith("\\")) leading = "\\";
+	} else if (firstPart.startsWith("/")) {
+		leading = "/";
 	}
-	const leading = joined.startsWith("/") ? "/" : "";
-	const body = joined.slice(leading.length);
-	return leading + body.replace(/\/{2,}/g, "/");
+	// Strip the leading separator(s) from the first part before joining, so
+	// the collapse regex doesn't re-collapse them.
+	const firstPartStripped =
+		sep === "\\"
+			? firstPart.replace(/^\\{1,2}/, "")
+			: firstPart.replace(/^\/+/, "");
+	const rest = filtered.slice(1);
+	const joined = [firstPartStripped, ...rest].filter(Boolean).join(sep);
+	// Collapse internal runs of the separator.
+	const collapsed = joined.replace(
+		new RegExp(`${sep === "\\" ? "\\\\" : "/"}{2,}`, "g"),
+		sep,
+	);
+	return leading + collapsed;
 }
 
 function safeDirname(p: string): string {

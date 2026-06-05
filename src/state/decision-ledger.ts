@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { projectCrewRoot } from "../utils/paths.ts";
+import { assertSafePathId } from "../utils/safe-paths.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
 
 export interface CoherenceMark {
@@ -100,6 +101,7 @@ function computeCoherence(
  * Creates the directory and ledger file if they don't exist.
  */
 export function initLedger(runId: string): void {
+	assertSafePathId("runId", runId);
 	const ledgerPath = getLedgerPath(runId);
 	const dir = dirname(ledgerPath);
 
@@ -151,6 +153,7 @@ export function appendEntry(runId: string, entry: RolloutEntry): RolloutEntry {
  * Read all entries from the decision ledger.
  */
 export function getLedger(runId: string): RolloutEntry[] {
+	assertSafePathId("runId", runId);
 	const ledgerPath = getLedgerPath(runId);
 
 	if (!existsSync(ledgerPath)) {
@@ -289,6 +292,8 @@ export function promoteCandidate(
 	runId: string,
 	candidate: string,
 ): RolloutEntry {
+	assertSafePathId("runId", runId);
+	assertSafePathId("candidate", candidate);
 	const latestDecision = getLatestDecision(runId);
 
 	// Get existing entries to compute proper coherence
@@ -342,6 +347,8 @@ export function promoteCandidate(
  * Decay a candidate by marking it as accepted with proper coherence.
  */
 export function decayCandidate(runId: string, candidate: string): RolloutEntry {
+	assertSafePathId("runId", runId);
+	assertSafePathId("candidate", candidate);
 	const latestDecision = getLatestDecision(runId);
 
 	// Get existing entries to compute proper coherence
