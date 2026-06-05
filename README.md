@@ -9,22 +9,24 @@ npm: pi-crew
 repo: https://github.com/baphuongna/pi-crew
 ```
 
-**v0.5.22**: See [CHANGELOG.md](CHANGELOG.md).
+**v0.6.1**: See [CHANGELOG.md](CHANGELOG.md).
 
-### Security highlights (v0.5.22)
+### Security highlights (v0.6.1)
 
-- **ReDoS-free secret redaction** — linear-time scanning in `redaction.ts`; no catastrophic backtracking
-- **v8.deserialize hardened** — `BINARY_MAGIC` header guards on registry binaries prevent untrusted-file RCE
-- **Cache lock protection** — `withFileLockSync` and atomic writes across `run-cache.ts` and `state-store.ts`
-- **Shell injection prevented** — `execFileSync` with array args everywhere (no shell-interpreted strings)
+- **42+ security issues fixed** — 7 CRITICAL, 10 HIGH, 11 MEDIUM, 14 post-restart findings
+- **Timing-safe token comparison** — constant-time compare for lock tokens and request IDs
+- **Environment leak prevention** — `sanitizeEnvSecrets()` on all child process spawns
+- **Shell injection hardened** — `execFileSync` with array args; blocked `String.fromCharCode` bypass
+- **ReDoS-free secret redaction** — linear-time scanning in `redaction.ts`
+- **Sandbox prototype isolation** — `Object.freeze` scoped to VM context; `constructor` pattern blocked
+- **Symlink traversal prevention** — `fs.realpathSync` before path containment checks
 - **Safe-bash line-continuation hardening** — `$\n(evil)` command substitution bypass blocked
-- **Sandbox prototype isolation** — `Object.freeze` scoped to VM context (not host process)
 - **Path traversal mitigated** — `resolveContainedPath`/`resolveRealContainedPath` across all file ops
-- **TOCTOU-free file ops** — atomic `mkdirSync` in `crew-init.ts`; `realpath`-based path validation
 - **Memory leaks capped** — Maps, Sets, arrays bounded with eviction across all modules
-- **Inline secret detection** — `token=`, `api_key=`, `password=` patterns redacted at event/mailbox boundaries
-- **CI exit code enforced** — `test-runner.mjs` wrapper ensures non-zero exit on failures
-- **38 audit rounds, 160+ issues fixed** — 3 CRITICAL + 6 HIGH + 3 MEDIUM security issues resolved
+- **Event log race conditions fixed** — sync/async queue unification
+- **Subagent record sanitization** — allow-listed field persistence
+- **~1,900 new tests**, 113 test files — total suite ~4,600 tests, 0 failures
+- **42+ audit rounds, 160+ issues fixed** across all severity levels
 
 See [SECURITY-ISSUES.md](SECURITY-ISSUES.md) for the full list (SEC-001 – SEC-007 all marked fixed).
 

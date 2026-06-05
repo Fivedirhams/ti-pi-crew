@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.6.1] — Post-v0.6.0 Security Hardening + Test Coverage (2026-06-04)
+
+### Highlights
+- **42+ security issues fixed** — 7 CRITICAL, 10 HIGH, 11 MEDIUM, 14 post-restart review findings
+- **~1,900 new tests** across 113+ test files — total suite now ~4,600 tests
+- **38 dead exports cleaned** across 19 modules
+- **12 `any` types replaced** with proper TypeScript types
+- **Full battle-testing** — 2 Pi restart cycles, all team types, management operations verified
+
+### Security Fixes (CRITICAL)
+- `async-runner.ts`: Environment variable leak in child process — sanitized with `sanitizeEnvSecrets()`
+- `verification-gates.ts`: Shell injection via user-controlled strings — switched to `execFileSync`
+- `sandbox.ts`: `String.fromCharCode` bypass — added `constructor` to `FORBIDDEN_PATTERNS`
+- `locks.ts`: Timing-unsafe comparison on lock tokens — replaced with constant-time compare
+- `event-log.ts`: Request IDs logged in plaintext — now hashed before logging
+- `team-runner.ts`: Missing heartbeat for long-running tasks — added 30s heartbeat writer
+- `worktree-manager.ts`: Environment secrets leaked to git subprocesses — `sanitizeEnvSecrets()`
+
+### Security Fixes (HIGH)
+- `preStepScript` symlink traversal — `fs.realpathSync` before path containment check
+- `childEnvAllowList` wildcard patterns (`LC_*`, `XDG_*`) could leak secrets
+- Event log sync/async race condition — route sync `appendEvent` through async queue
+- Subagent record validation — `sanitizePersistedRecord()` with allow-listed fields
+- Verification gate redirect — allow single `>` for `2>&1`, block `>>` and `<[^&]`
+- `allowPatterns` validation — reject patterns matching empty strings
+
+### Security Fixes (MEDIUM)
+- `logInternalError` import paths normalized across all modules
+- `Object.freeze()` narrowing fix — use `Readonly<{...}>` explicit types
+- NTFS mtime granularity — write-first, `utimes`-after for cache invalidation
+- Windows path separators — platform-agnostic assertions in tests
+- `executeUnchecked` visibility — `__test_executeUnchecked` export pattern
+- `seedPaths` containment — `normalizeSeedPaths()` validates paths stay within `repoRoot`
+
+### Code Quality
+- 38 dead/unused exports removed across 19 source modules
+- 12 `any` types replaced with proper interfaces
+- `enforceLabelCap` MRU correctness — `delete`-then-`set` to maintain Map insertion order
+- `readIfSmall` bounded reads — `Buffer.alloc` + `fs.readSync` instead of `readFileSync`
+
+### Test Coverage
+- 113 new test files, ~1,900 new test cases
+- Modules now covered: config, extension, workflow, subagent, observability, runtime, graph,
+  heartbeat, permissions, state, locks, event-log, safe-bash, sandbox, verification-gates,
+  async-runner, team-runner, background-runner, worktree, fingerprint, BM25 search, and more
+- Windows CI verified: path separators, `npx.cmd` resolution, NTFS mtime all pass
+- Test runner wrapper (`scripts/test-runner.mjs`) ensures non-zero exit on failures
+
+### Stats
+- Test suite: ~4,600 pass, 0 fail
+- TypeScript: 0 errors
+- Lines added since v0.6.0: 22,520 (742 src + 21,777 test)
+- Files changed: 204
+- Security issues fixed: 42+
+- Audit rounds: 42 (including post-v0.6.0 battle-testing)
+
+## [0.6.0] — Source Tour Patterns + 15 New Modules (2026-06-03)
+
+### Highlights
+- **15 upstream patterns implemented** from 63-repository source tour
+- **10 new source modules** (2,267 LOC): chain-parser, run-drift, intercom-bridge,
+  plan-templates, task-id, context-retrieval, intermediate-store, fingerprint,
+  memory-store, observation-store
+- **37 skills reviewed** with origin fields, all passing validation
+
 ## [0.5.22] — Remaining Issues from Ultimate Sweep (2026-06-03)
 
 ### Highlights
