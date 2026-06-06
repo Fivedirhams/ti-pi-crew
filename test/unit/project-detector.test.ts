@@ -1,6 +1,5 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import * as path from "node:path";
 import {
 	detectProjectId,
 	getProjectStorageDir,
@@ -60,26 +59,24 @@ describe("detectProjectId", () => {
 
 describe("getProjectStorageDir", () => {
 	it("returns path under instincts/projects/{projectId}", () => {
-		const crewRoot = path.join(path.sep, "root", ".crew");
-		const result = getProjectStorageDir("abc123", crewRoot);
-		assert.equal(result, path.join(crewRoot, "instincts", "projects", "abc123"));
+		const result = getProjectStorageDir("abc123", "/root/.crew");
+		assert.equal(result, "/root/.crew/instincts/projects/abc123");
 	});
 
 	it("handles empty crewRoot", () => {
 		const result = getProjectStorageDir("abc", "");
-		assert.equal(result, path.join("instincts", "projects", "abc"));
+		assert.equal(result, "instincts/projects/abc");
 	});
 });
 
 describe("getGlobalStorageDir", () => {
 	it("returns path under instincts/global", () => {
-		const crewRoot = path.join(path.sep, "root", ".crew");
-		const result = getGlobalStorageDir(crewRoot);
-		assert.equal(result, path.join(crewRoot, "instincts", "global"));
+		const result = getGlobalStorageDir("/root/.crew");
+		assert.equal(result, "/root/.crew/instincts/global");
 	});
 
 	it("handles empty crewRoot", () => {
 		const result = getGlobalStorageDir("");
-		assert.equal(result, path.join("instincts", "global"));
+		assert.equal(result, "instincts/global");
 	});
 });

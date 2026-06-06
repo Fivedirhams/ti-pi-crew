@@ -6,15 +6,7 @@ interface TimerApi {
 }
 
 const defaultTimerApi: TimerApi = {
-	setTimeout: (handler, delayMs) => {
-		const t = setTimeout(handler, delayMs);
-		// Defense in depth: never let a coalescer timer block process exit.
-		// The timer may be cleared before it fires; .unref() is idempotent.
-		if (typeof t === "object" && t && "unref" in t && typeof t.unref === "function") {
-			t.unref();
-		}
-		return t;
-	},
+	setTimeout: (handler, delayMs) => setTimeout(handler, delayMs),
 	clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
