@@ -6,6 +6,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { logInternalError } from "../utils/internal-error.ts";
 import { appendEvent } from "../state/event-log.ts";
 import { sanitizeEnvSecrets } from "../utils/env-filter.ts";
+import {
+	registerWorker,
+	unregisterWorker,
+} from "./orphan-worker-registry.ts";
 import type { TeamRunManifest } from "../state/types.ts";
 
 
@@ -222,6 +226,16 @@ export async function spawnBackgroundTeamRun(manifest: TeamRunManifest): Promise
 		logInternalError("async-runner.spawn", error, `pid=${child.pid ?? "unknown"}`);
 	});
 	child.unref();
+
+	// Track this worker in the orphan registry so it can be killed on
+	// session_start of a future session if the parent pi process is killed.
+	if (child.pid) {
+		registerWorker(child.pid, manifest.ownerSessionId ?? "unknown", manifest.runId);
+		// Best-effort: unregister when child exits. Background-runner writes
+		// the marker file before it dies, so we unregister on the next
+		// cleanup tick. But the child "exit" event won't fire because we
+		// unref'd and the stdio is piped + ignored.
+	}
 
 	return { pid: child.pid, logPath };
 }

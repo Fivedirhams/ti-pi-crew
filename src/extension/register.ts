@@ -133,6 +133,7 @@ import {
 import { appendDeadletter } from "../runtime/deadletter.ts";
 import { HeartbeatWatcher } from "../runtime/heartbeat-watcher.ts";
 import { cleanupOrphanTempDirs, cleanupLegacyOrphanTempDirs } from "../runtime/pi-args.ts";
+import { cleanupOrphanWorkers } from "../runtime/orphan-worker-registry.ts";
 import { reconcileOrphanedTempWorkspaces } from "../runtime/stale-reconciler.ts";
 
 let _cachedCrashRecovery:
@@ -1244,6 +1245,52 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 							error,
 						);
 					}
+				}
+
+				// Startup cleanup (Fix A): run orphan-temp-dir cleanup
+				// immediately on session_start so we don't wait 5 minutes
+				// for the first timer tick. Especially important after
+				// a SIGKILL'd previous session that left thousands of
+				// orphan temp dirs behind.
+				try {
+					const orphanTmp = cleanupOrphanTempDirs();
+					const legacyTmp = cleanupLegacyOrphanTempDirs();
+					if (orphanTmp.cleaned > 0 || legacyTmp.cleaned > 0) {
+						logInternalError(
+							"register.sessionStart.startupTempCleanup",
+							new Error(
+								`cleaned ${orphanTmp.cleaned} user-tmp + ${legacyTmp.cleaned} legacy /tmp dirs`,
+							),
+						);
+					}
+				} catch (error) {
+					logInternalError(
+						"register.sessionStart.startupTempCleanup",
+						error,
+					);
+				}
+
+				// Orphan worker cleanup (Fix B): kill stale background-runner
+				// processes from previous (SIGKILL'd) sessions. Workers
+				// detached via setsid+unref outlive the spawning pi
+				// session, and the per-worker parent-guard is intentionally
+				// disabled for background-runner (BUG #17 design). So
+				// orphans can only be cleaned from the next session_start.
+				try {
+					const orphanWorkers = cleanupOrphanWorkers(currentSessionId);
+					if (orphanWorkers.killed > 0) {
+						logInternalError(
+							"register.sessionStart.orphanWorkers",
+							new Error(
+								`killed ${orphanWorkers.killed} orphan background workers (pruned ${orphanWorkers.pruned} dead, kept ${orphanWorkers.kept})`,
+							),
+						);
+					}
+				} catch (error) {
+					logInternalError(
+						"register.sessionStart.orphanWorkers",
+						error,
+					);
 				}
 
 				// Global purge of stale active-run-index entries
