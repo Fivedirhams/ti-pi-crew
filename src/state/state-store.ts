@@ -221,19 +221,19 @@ export async function saveRunTasksAsync(manifest: TeamRunManifest, tasks: TeamTa
 
 /**
  * Save manifest and tasks files with individual atomic writes.
- *
- * Note: The two writes are individually atomic (via rename) but not
- * jointly atomic — a crash between writes can leave them inconsistent.
- * This is acceptable because crash recovery detects and repairs
- * inconsistent state on next session start.
+ * FIX: Changed from Promise.all (parallel, non-jointly-atomic) to sequential
+ * writes to ensure manifest and tasks are always consistent. A crash between
+ * writes now leaves them in a known state (manifest is the older copy, tasks
+ * is newer) that stale-reconciler can repair.
  */
 /** @internal */
 async function saveManifestAndTasksAtomic(manifest: TeamRunManifest, tasks: TeamTaskState[]): Promise<void> {
 	await withRunLock(manifest, async () => {
-		await Promise.all([
-			atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest),
-			atomicWriteJsonAsync(manifest.tasksPath, tasks),
-		]);
+		// FIX: Sequential writes instead of Promise.all to ensure manifest is
+		// written before tasks. If a crash occurs between writes, manifest is
+		// the older timestamp which stale-reconciler uses to detect inconsistency.
+		await atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest);
+		await atomicWriteJsonAsync(manifest.tasksPath, tasks);
 		invalidateRunCache(manifest.stateRoot);
 	});
 }
@@ -366,6 +366,7 @@ export async function loadRunManifestByIdAsync(cwd: string, runId: string): Prom
 	if (!stateRoot) return undefined;
 	const manifestPath = path.join(stateRoot, "manifest.json");
 	const tasksPath = path.join(stateRoot, "tasks.json");
+
 	let manifestStat: fs.Stats;
 	try {
 		manifestStat = await fs.promises.stat(manifestPath);
@@ -391,9 +392,28 @@ export async function loadRunManifestByIdAsync(cwd: string, runId: string): Prom
 			return { manifest: cached.manifest, tasks: cached.tasks };
 		}
 	}
-	const manifest = await readJsonFileAsync<TeamRunManifest>(manifestPath);
+
+	// FIX: Sentinel-based retry loop to close TOCTOU window between stat and read.
+	// Matches the pattern used in the sync loadRunManifestById.
+	let manifest: TeamRunManifest | undefined;
+	let tasks: TeamTaskState[] | undefined;
+	let attempts = 0;
+	while (attempts < 3) {
+		const freshStat = await fs.promises.stat(manifestPath);
+		manifest = await readJsonFileAsync<TeamRunManifest>(manifestPath);
+		const freshTasksStat = await fs.promises.stat(tasksPath).catch(() => undefined);
+		tasks = (await readJsonFileAsync<TeamTaskState[]>(tasksPath)) ?? [];
+		// If size/mtime didn't change between stat and read, we're consistent.
+		if (freshStat.mtimeMs === manifestStat.mtimeMs && freshStat.size === manifestStat.size
+			&& (!freshTasksStat || (freshTasksStat.mtimeMs === tasksStat?.mtimeMs && freshTasksStat.size === tasksStat?.size))) {
+			break;
+		}
+		attempts += 1;
+		manifestStat = freshStat;
+		tasksStat = freshTasksStat;
+	}
+
 	if (!manifest || !validateRunManifestPaths(cwd, runId, manifest, stateRoot, tasksPath)) return undefined;
-	const tasks = await readJsonFileAsync<TeamTaskState[]>(tasksPath) ?? [];
-	setManifestCache(stateRoot, { manifest, tasks, manifestMtimeMs: manifestStat.mtimeMs, manifestSize: manifestStat.size, tasksMtimeMs, tasksSize: tasksStat?.size ?? 0 });
-	return { manifest, tasks };
+	setManifestCache(stateRoot, { manifest, tasks: tasks ?? [], manifestMtimeMs: manifestStat.mtimeMs, manifestSize: manifestStat.size, tasksMtimeMs, tasksSize: tasksStat?.size ?? 0 });
+	return { manifest, tasks: tasks ?? [] };
 }

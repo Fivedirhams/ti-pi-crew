@@ -602,11 +602,18 @@ async function main(): Promise<void> {
 		stopInterruptGuard();
 		stopParentGuard();
 		stopHeartbeat();
+		// FIX: clearInterval FIRST, then kill children. This ensures the heartbeat
+		// interval is always cleaned up even if terminateActiveChildPiProcesses throws.
 		clearInterval(keepAlive);
-		// FIX: Always kill child processes on exit. executeTeamRun's terminateLiveAgentsForRun
-		// only handles live-session agents, not child-pi processes. Without this, child-pi
-		// processes can become orphaned if executeTeamRun throws before completing.
-		const killed = terminateActiveChildPiProcesses();
+		// FIX: Wrap child process termination in try/catch so errors don't prevent
+		// the finally block from completing. We log but don't re-throw since we're
+		// already exiting.
+		let killed = 0;
+		try {
+			killed = terminateActiveChildPiProcesses();
+		} catch (error) {
+			console.log(`[background-runner] finally: terminateActiveChildPiProcesses error: ${error instanceof Error ? error.message : String(error)}`);
+		}
 		console.log(
 			`[background-runner] finally: killed ${killed} child processes`,
 		);

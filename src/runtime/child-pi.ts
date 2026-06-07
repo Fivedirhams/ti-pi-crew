@@ -239,14 +239,23 @@ export function buildChildPiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): S
 			"NPM_CONFIG_REGISTRY",
 			"NPM_CONFIG_USERCONFIG",
 			"NPM_CONFIG_GLOBALCONFIG",
-			"PI_*",
-			"PI_CREW_*",
-			"PI_TEAMS_*",
+			// FIX: Replace PI_CREW_*/PI_TEAMS_* wildcards with explicit list of
+			// safe vars. Wildcards are fragile — any new secret var would leak.
+			// Only non-secret execution-control vars that children legitimately need.
+			"PI_CREW_DEPTH",
+			"PI_CREW_MAX_DEPTH",
+			"PI_CREW_INHERIT_PROJECT_CONTEXT",
+			"PI_CREW_INHERIT_SKILLS",
+			"PI_TEAMS_DEPTH",
+			"PI_TEAMS_MAX_DEPTH",
+			"PI_TEAMS_INHERIT_PROJECT_CONTEXT",
+			"PI_TEAMS_INHERIT_SKILLS",
+			"PI_TEAMS_PI_BIN",
+			"PI_TEAMS_MOCK_CHILD_PI",
 		],
 	});
-	// Block execution control vars from leaking to child processes
-	delete filteredEnv.PI_CREW_EXECUTE_WORKERS;
-	delete filteredEnv.PI_TEAMS_EXECUTE_WORKERS;
+	// FIX: Removed delete workarounds — with explicit allowlist, these vars
+	// are no longer auto-leaked. The wildcard approach was fragile.
 	return {
 		cwd,
 		env: { ...filteredEnv, PI_CREW_PARENT_PID: String(process.pid) },

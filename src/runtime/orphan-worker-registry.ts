@@ -16,11 +16,16 @@
  *
  * Persistence: file-based JSON in `<userPiRoot>/state/orphan-workers.json`.
  * File is rewritten on every operation to drop dead PIDs.
+ *
+ * Thread-safety: All mutating operations (registerWorker, unregisterWorker,
+ * cleanupOrphanWorkers) are protected by file locking to prevent concurrent
+ * writes from causing lost updates.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { userPiRoot } from "../utils/paths.ts";
 import { logInternalError } from "../utils/internal-error.ts";
+import { withFileLockSync } from "../state/locks.ts";
 
 const STALE_REGISTRATION_MS = 60 * 60 * 1000; // 1 hour
 
@@ -40,15 +45,34 @@ export interface OrphanWorkerEntry {
  * the same PID for an unrelated process. Without verification, we'd
  * kill that unrelated process.
  *
- * Strategy: read /proc/<pid>/cmdline (Linux) and check it contains
- * "background-runner". Falls back to trusting the registry on other
- * platforms where /proc isn't available.
+ * Strategy: read /proc/<pid>/cmdline (Linux) and verify:
+ *   1. First arg is node (or wrapped node like bun/pm2)
+ *   2. One of the args ends with "background-runner.ts"
+ *
+ * This is stronger than a simple substring match because it verifies
+ * the actual script being executed, not just a string that happens to
+ * appear somewhere in the command line.
+ *
+ * Falls back to trusting the registry on other platforms where /proc
+ * isn't available.
  */
 function verifyIsBackgroundWorker(pid: number): boolean {
 	try {
 		const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf-8");
-		// cmdline fields are NUL-separated
-		return cmdline.includes("background-runner");
+		// cmdline is NUL-separated; empty string after final NUL is normal
+		const args = cmdline.split("\0").filter((a) => a.length > 0);
+		if (args.length === 0) return false;
+
+		// Verify first arg is a node runtime (node, bun, deno, etc.)
+		// We only want to verify node-based workers, not random processes
+		const exe = path.basename(args[0]);
+		if (!["node", "bun", "deno"].some((r) => exe.includes(r))) {
+			return false;
+		}
+
+		// Check if any arg ends with background-runner.ts (the actual script)
+		// This is the actual verification — the script must be our background-runner
+		return args.some((arg) => arg.endsWith("background-runner.ts"));
 	} catch {
 		// /proc not available (macOS, Windows) or PID gone — trust registry
 		return true;
@@ -116,17 +140,19 @@ export function registerWorker(
 	parentPid: number,
 ): void {
 	if (!Number.isFinite(pid) || pid <= 0) return;
-	const entries = readRegistry();
-	// Dedupe by PID
-	const filtered = entries.filter((e) => e.pid !== pid);
-	filtered.push({
-		pid,
-		sessionId,
-		runId,
-		parentPid: Number.isFinite(parentPid) ? parentPid : 0,
-		registeredAt: Date.now(),
+	withFileLockSync(getRegistryPath(), () => {
+		const entries = readRegistry();
+		// Dedupe by PID
+		const filtered = entries.filter((e) => e.pid !== pid);
+		filtered.push({
+			pid,
+			sessionId,
+			runId,
+			parentPid: Number.isFinite(parentPid) ? parentPid : 0,
+			registeredAt: Date.now(),
+		});
+		writeRegistry(filtered);
 	});
-	writeRegistry(filtered);
 }
 
 /**
@@ -135,11 +161,13 @@ export function registerWorker(
  */
 export function unregisterWorker(pid: number): void {
 	if (!Number.isFinite(pid) || pid <= 0) return;
-	const entries = readRegistry();
-	const filtered = entries.filter((e) => e.pid !== pid);
-	if (filtered.length !== entries.length) {
-		writeRegistry(filtered);
-	}
+	withFileLockSync(getRegistryPath(), () => {
+		const entries = readRegistry();
+		const filtered = entries.filter((e) => e.pid !== pid);
+		if (filtered.length !== entries.length) {
+			writeRegistry(filtered);
+		}
+	});
 }
 
 export interface CleanupOrphanWorkersResult {
@@ -166,74 +194,78 @@ export interface CleanupOrphanWorkersResult {
 export function cleanupOrphanWorkers(
 	currentSessionId?: string,
 ): CleanupOrphanWorkersResult {
-	const entries = readRegistry();
-	const now = Date.now();
-	const kept: OrphanWorkerEntry[] = [];
-	let killed = 0;
-	let pruned = 0;
-	for (const entry of entries) {
-		try {
-			process.kill(entry.pid, 0);
-			// PID is alive
-			const isMine = currentSessionId && entry.sessionId === currentSessionId;
-			if (isMine) {
-				// My session's worker — keep regardless of age
-				kept.push(entry);
-				continue;
-			}
-			// Verify parent is actually dead before killing worker.
-			// If parent is alive, this is a concurrent session's worker
-			// (or the same session that was misidentified). Keep it.
-			if (entry.parentPid > 0) {
-				try {
-					process.kill(entry.parentPid, 0);
-					// Parent is alive — concurrent session, keep worker
+	let result: CleanupOrphanWorkersResult = { scanned: 0, killed: 0, pruned: 0, kept: 0 };
+	withFileLockSync(getRegistryPath(), () => {
+		const entries = readRegistry();
+		const now = Date.now();
+		const kept: OrphanWorkerEntry[] = [];
+		let killed = 0;
+		let pruned = 0;
+		for (const entry of entries) {
+			try {
+				process.kill(entry.pid, 0);
+				// PID is alive
+				const isMine = currentSessionId && entry.sessionId === currentSessionId;
+				if (isMine) {
+					// My session's worker — keep regardless of age
 					kept.push(entry);
 					continue;
-				} catch {
-					// Parent is dead — proceed to verify it's actually our worker
 				}
-			}
-			// Verify it's actually a background-runner, not a reused PID
-			if (!verifyIsBackgroundWorker(entry.pid)) {
-				// PID reused by another process — prune, don't kill
+				// Verify parent is actually dead before killing worker.
+				// If parent is alive, this is a concurrent session's worker
+				// (or the same session that was misidentified). Keep it.
+				if (entry.parentPid > 0) {
+					try {
+						process.kill(entry.parentPid, 0);
+						// Parent is alive — concurrent session, keep worker
+						kept.push(entry);
+						continue;
+					} catch {
+						// Parent is dead — proceed to verify it's actually our worker
+					}
+				}
+				// Verify it's actually a background-runner, not a reused PID
+				if (!verifyIsBackgroundWorker(entry.pid)) {
+					// PID reused by another process — prune, don't kill
+					pruned++;
+					continue;
+				}
+				if (now - entry.registeredAt > STALE_REGISTRATION_MS) {
+					// Stale orphan — SIGKILL because background-runner
+					// intentionally ignores SIGTERM (BUG #17 fix).
+					try {
+						process.kill(entry.pid, "SIGKILL");
+						killed++;
+					} catch {
+						// Race: died between check and kill
+						pruned++;
+					}
+				} else {
+					// Fresh and not mine, parent dead, but recently registered.
+					// Could be the same session that died < 1h ago and was
+					// about to be cleaned up by parent-guard. Be conservative
+					// and SIGKILL — orphaned workers waste resources.
+					try {
+						process.kill(entry.pid, "SIGKILL");
+						killed++;
+					} catch {
+						pruned++;
+					}
+				}
+			} catch {
+				// PID is dead — prune from registry
 				pruned++;
-				continue;
 			}
-			if (now - entry.registeredAt > STALE_REGISTRATION_MS) {
-				// Stale orphan — SIGKILL because background-runner
-				// intentionally ignores SIGTERM (BUG #17 fix).
-				try {
-					process.kill(entry.pid, "SIGKILL");
-					killed++;
-				} catch {
-					// Race: died between check and kill
-					pruned++;
-				}
-			} else {
-				// Fresh and not mine, parent dead, but recently registered.
-				// Could be the same session that died < 1h ago and was
-				// about to be cleaned up by parent-guard. Be conservative
-				// and SIGKILL — orphaned workers waste resources.
-				try {
-					process.kill(entry.pid, "SIGKILL");
-					killed++;
-				} catch {
-					pruned++;
-				}
-			}
-		} catch {
-			// PID is dead — prune from registry
-			pruned++;
 		}
-	}
-	if (kept.length !== entries.length) {
-		writeRegistry(kept);
-	}
-	return {
-		scanned: entries.length,
-		killed,
-		pruned,
-		kept: kept.length,
-	};
+		if (kept.length !== entries.length) {
+			writeRegistry(kept);
+		}
+		result = {
+			scanned: entries.length,
+			killed,
+			pruned,
+			kept: kept.length,
+		};
+	});
+	return result;
 }

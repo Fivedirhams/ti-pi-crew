@@ -246,9 +246,18 @@ export async function appendEventAsync(eventsPath: string, event: AppendTeamEven
 		await fs.promises.mkdir(path.dirname(eventsPath), { recursive: true });
 
 		// Build metadata (same logic as appendEventInsideLock)
+		// FIX: Compute sequence INSIDE the promise chain and persist BEFORE append.
+		// This ensures the sidecar is updated before the event is written, preventing
+		// sequence reuse if the process crashes after append but before persist.
 		const baseMetadata = event.metadata;
+		const seq = baseMetadata?.seq ?? (() => {
+			const s = nextSequence(eventsPath);
+			// Persist immediately BEFORE the append so sidecar is always current
+			persistSequence(eventsPath, s);
+			return s;
+		})();
 		let metadata: TeamEventMetadata = {
-			seq: baseMetadata?.seq ?? nextSequence(eventsPath),
+			seq,
 			provenance: baseMetadata?.provenance ?? "team_runner",
 			...(baseMetadata?.parentEventId ? { parentEventId: baseMetadata.parentEventId } : {}),
 			...(baseMetadata?.attemptId ? { attemptId: baseMetadata.attemptId } : {}),
@@ -309,14 +318,17 @@ export async function appendEventAsync(eventsPath: string, event: AppendTeamEven
 		}
 		try { emitFromTeamEvent(fullEvent); } catch (error) { logInternalError("event-log.emit", error); }
 
-		const seq = fullEvent.metadata?.seq ?? 0;
+		// FIX: Sequence was already persisted BEFORE append in the seq computation block above.
+		// Only update the cache here (the sidecar persist is already done).
+		const finalSeq = fullEvent.metadata?.seq ?? 0;
 		try {
 			const stat = fs.statSync(eventsPath);
 			if (sequenceCache.size >= MAX_SEQUENCE_CACHE_ENTRIES) {
 				evictOldestSequenceCacheEntries();
 			}
-			sequenceCache.set(eventsPath, { size: stat.size, mtimeMs: stat.mtimeMs, seq });
-			persistSequence(eventsPath, seq);
+			sequenceCache.set(eventsPath, { size: stat.size, mtimeMs: stat.mtimeMs, seq: finalSeq });
+			// Note: persistSequence is NOT called here again - it was already called
+			// before the append to ensure the sidecar is current before the event is written.
 		} catch (error) {
 			logInternalError("event-log.persist-sequence", error, `eventsPath=${eventsPath}`);
 		}

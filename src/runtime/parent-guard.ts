@@ -46,9 +46,10 @@ function selfTerminate(parentPid: number): never {
  * Start a lightweight poll that checks if the parent process is still alive.
  * If the parent dies, this worker exits immediately with code 124.
  *
- * The interval is `unref()`'d so it doesn't keep the event loop alive
- * on its own — but if the worker has other work (LLM calls, tool execution),
- * the check continues running in the background.
+ * FIX: Removed unref() — the guard interval MUST keep the event loop alive
+ * to prevent premature worker exit when the parent is still alive but the
+ * worker has no other pending work (LLM calls, timers, I/O). Without this,
+ * a worker in pure CPU wait could exit even though its parent is alive.
  */
 export function startParentGuard(parentPid: number): void {
 	if (!parentPid || !Number.isFinite(parentPid) || parentPid <= 0) return;
@@ -65,7 +66,12 @@ export function startParentGuard(parentPid: number): void {
 		}
 	}, POLL_INTERVAL_MS);
 
-	guardInterval.unref();
+	// NOTE: Intentionally NOT calling guardInterval.unref() here.
+	// The watchdog timer must keep the event loop alive to ensure the worker
+	// doesn't exit while the parent is alive. If other work (child processes,
+	// timers, I/O) keeps the loop alive, that's fine — the guard runs as a
+	// side effect. If no other work exists, the guard is the only thing
+	// keeping the process alive, and that's by design.
 }
 
 /**

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { readEvents } from "./event-log.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
 import { logInternalError } from "../utils/internal-error.ts";
+import { withEventLogLockSync } from "./event-log.ts";
 
 export interface RotationConfig {
 	maxFileSizeBytes: number;
@@ -72,54 +73,61 @@ export function compactEventLog(eventsPath: string, config?: Partial<RotationCon
 	if (originalCount <= cfg.compactToCount) return undefined;
 	const kept = allEvents.slice(-cfg.compactToCount);
 	const lines = kept.map((e) => JSON.stringify(e)).join("\n") + "\n";
-	try {
-		atomicWriteFile(eventsPath, lines);
-	} catch {
-		// Concurrent write conflict — skip compaction this cycle
-		return undefined;
-	}
-	// C2: Re-read to recover any events appended during the compaction window.
-	// If events were appended and then overwritten by atomicWriteFile, they are LOST.
-	// Detect this and re-append any missing events.
-	try {
-		const afterWrite = readEvents(eventsPath);
-		const appendedDuringWindow = afterWrite.length - kept.length;
-		if (appendedDuringWindow >= 0) {
-			// No data loss — either events were appended and kept, or nothing happened.
+
+	// FIX: Wrap entire read-compact-write-recover sequence in lock to prevent
+	// event loss during compaction. Without lock, events can be appended between
+	// read and write, lost silently.
+	return withEventLogLockSync(eventsPath, () => {
+		try {
+			atomicWriteFile(eventsPath, lines);
+		} catch {
+			// Concurrent write conflict — skip compaction this cycle
+			return undefined;
+		}
+		// C2: Re-read to recover any events appended during the compaction window.
+		// If events were appended and then overwritten by atomicWriteFile, they are LOST.
+		// Detect this and re-append any missing events.
+		try {
+			const afterWrite = readEvents(eventsPath);
+			const appendedDuringWindow = afterWrite.length - kept.length;
+			if (appendedDuringWindow >= 0) {
+				// No data loss — either events were appended and kept, or nothing happened.
+				return {
+					originalSize,
+					compactedSize: fs.statSync(eventsPath).size,
+					eventsRemoved: originalCount - kept.length,
+					eventsKept: kept.length + Math.max(0, appendedDuringWindow),
+				};
+			}
+			// afterWrite.length < kept.length — events were lost during compaction window.
+			// Find missing events and re-append them.
+			const afterSet = new Set(afterWrite.map((e) => JSON.stringify(e)));
+			const missingEvents = kept.filter((e) => !afterSet.has(JSON.stringify(e)));
+			for (const event of missingEvents) {
+				try {
+					// Use atomicWriteFile for recovery append too — safer than plain appendFileSync
+					atomicWriteFile(eventsPath, JSON.stringify(event) + "\n");
+				} catch {
+					// Append failed — log but don't throw.
+				}
+			}
 			return {
 				originalSize,
 				compactedSize: fs.statSync(eventsPath).size,
 				eventsRemoved: originalCount - kept.length,
-				eventsKept: kept.length + Math.max(0, appendedDuringWindow),
+				eventsKept: kept.length,
+			};
+		} catch {
+			// Post-write verification failed — compaction likely succeeded.
+			const compactedSize = fs.statSync(eventsPath).size;
+			return {
+				originalSize,
+				compactedSize,
+				eventsRemoved: originalCount - kept.length,
+				eventsKept: kept.length,
 			};
 		}
-		// afterWrite.length < kept.length — events were lost during compaction window.
-		// Find missing events and re-append them.
-		const afterSet = new Set(afterWrite.map((e) => JSON.stringify(e)));
-		const missingEvents = kept.filter((e) => !afterSet.has(JSON.stringify(e)));
-		for (const event of missingEvents) {
-			try {
-				fs.appendFileSync(eventsPath, JSON.stringify(event) + "\n", "utf-8");
-			} catch {
-				// Append failed — log but don't throw.
-			}
-		}
-		return {
-			originalSize,
-			compactedSize: fs.statSync(eventsPath).size,
-			eventsRemoved: originalCount - kept.length,
-			eventsKept: kept.length,
-		};
-	} catch {
-		// Post-write verification failed — compaction likely succeeded.
-		const compactedSize = fs.statSync(eventsPath).size;
-		return {
-			originalSize,
-			compactedSize,
-			eventsRemoved: originalCount - kept.length,
-			eventsKept: kept.length,
-		};
-	}
+	});
 }
 
 /**

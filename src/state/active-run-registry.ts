@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { serialize, deserialize } from "node:v8";
 import { DEFAULT_CACHE, DEFAULT_PATHS } from "../config/defaults.ts";
 import type { TeamRunManifest } from "./types.ts";
-import { atomicWriteJson } from "./atomic-write.ts";
+import { atomicWriteJson, renameWithRetry } from "./atomic-write.ts";
 import { userCrewRoot } from "../utils/paths.ts";
 import { isSafePathId } from "../utils/safe-paths.ts";
 import { sharedScanCache } from "../utils/scan-cache.ts";
@@ -152,7 +152,9 @@ function writeEntries(entries: ActiveRunRegistryEntry[]): void {
 	try {
 		const tempBin = `${registryBinaryPath()}.${process.pid}.${Date.now()}.tmp`;
 		fs.writeFileSync(tempBin, Buffer.concat([BINARY_MAGIC, serialize(trimmed)]));
-		fs.renameSync(tempBin, registryBinaryPath());
+		// FIX: Use renameWithRetry instead of fs.renameSync to handle
+		// EPERM/EBUSY/EACCES errors on Windows with exponential backoff.
+		renameWithRetry(tempBin, registryBinaryPath());
 	} catch (error) {
 		logInternalError("active-run-registry.binary-write", error);
 	}

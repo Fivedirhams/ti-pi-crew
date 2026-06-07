@@ -115,9 +115,12 @@ function releaseLock(filePath: string, token: string): void {
 	if (stored === undefined || timingSafeTokenMatch(stored, token)) {
 		try {
 			fs.rmSync(filePath, { force: true });
-		} catch {
-			// Best-effort cleanup. Either someone else with the same token got
-			// there first, or the lock is already gone — both are fine.
+		} catch (error) {
+			// FIX: Only ignore ENOENT (lock already gone). Other errors (EACCES,
+			// EPERM, EBUSY) indicate a real problem and should be surfaced.
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT") throw error;
+			// Lock already gone — that's fine, we wanted to release it anyway.
 		}
 	}
 	// If the stored token does not match, our lock has been stolen

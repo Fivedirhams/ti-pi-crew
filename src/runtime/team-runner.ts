@@ -129,7 +129,11 @@ function shouldMergeTaskUpdate(current: TeamTaskState, updated: TeamTaskState): 
 	if (current.finishedAt && updated.finishedAt) {
 		const currentFinished = new Date(current.finishedAt).getTime();
 		const updatedFinished = new Date(updated.finishedAt).getTime();
-		if (!Number.isNaN(currentFinished) && !Number.isNaN(updatedFinished) && updatedFinished < currentFinished) return false;
+		// FIX: Handle NaN currentFinished (malformed date). Treat NaN as infinity
+		// (never older than valid updated) to prevent regression from unknown state.
+		const currentTime = Number.isNaN(currentFinished) ? Infinity : currentFinished;
+		const updatedTime = Number.isNaN(updatedFinished) ? Infinity : updatedFinished;
+		if (updatedTime < currentTime) return false;
 	}
 	return updated.status !== current.status || updated.finishedAt !== current.finishedAt || updated.startedAt !== current.startedAt || Boolean(updated.resultArtifact) || Boolean(updated.error) || Boolean(updated.modelAttempts?.length) || Boolean(updated.usage) || Boolean(updated.attempts?.length);
 }

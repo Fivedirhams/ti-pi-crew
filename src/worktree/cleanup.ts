@@ -82,18 +82,23 @@ export function cleanupRunWorktrees(manifest: TeamRunManifest, options: { force?
 				const removeArgs = ["worktree", "remove", "--force", worktreePath];
 				git(manifest.cwd, removeArgs);
 				result.removed.push(worktreePath);
+				// FIX: entry is a DirEnt object, must use entry.name for the path.
+				// Also apply same newline stripping as safeDesc for consistency.
+				const safeBranchName = entry.name.slice(0, 200).replace(/[\r\n]+/g, " ");
 				const artifact = writeArtifact(manifest.artifactsRoot, {
 					kind: "metadata",
-					relativePath: `metadata/worktree-branch-${entry.name}.json`,
+					relativePath: `metadata/worktree-branch-${safeBranchName}.json`,
 					content: JSON.stringify({ worktreePath, branch: branchName, committedAt: new Date().toISOString(), mergeCommand: `git merge ${branchName}` }, null, 2),
 					producer: "worktree-cleanup",
 				});
 				result.artifactPaths.push(artifact.path);
 			} catch (error) {
 				// Fallback to preserving dirty worktree
+				// FIX: entry is a DirEnt object, must use entry.name
+				const safeFallbackName = entry.name.slice(0, 200).replace(/[\r\n]+/g, " ");
 				const artifact = writeArtifact(manifest.artifactsRoot, {
 					kind: "diff",
-					relativePath: `cleanup/${entry}.diff`,
+					relativePath: `cleanup/${safeFallbackName}.diff`,
 					content: captureDiff(worktreePath),
 					producer: "worktree-cleanup",
 				});

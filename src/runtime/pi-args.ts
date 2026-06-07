@@ -93,7 +93,27 @@ export function checkCrewDepth(inputMaxDepth?: number, env: NodeJS.ProcessEnv = 
  */
 export function createSafeTempDir(base: string, prefix: string): string {
 	if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true });
-	// Verify base dir is not a symlink (TOCTOU safety)
+	// FIX: Check FULL ancestor chain for symlinks before realpathSync.
+	// An attacker could plant a symlink at any ancestor of base (e.g.,
+	// making /home/bom/.pi -> /tmp/attacker). Walk from root to base
+	// and verify no component is a symlink.
+	const absoluteBase = path.resolve(base);
+	const parts = absoluteBase.split(path.sep);
+	let accumulated = "";
+	if (parts[0] === "") accumulated = "/"; // Unix root
+	for (let i = 1; i < parts.length; i++) {
+		if (parts[i] === "") continue;
+		accumulated = path.join(accumulated, parts[i]);
+		try {
+			const stat = fs.lstatSync(accumulated);
+			if (stat.isSymbolicLink()) throw new Error("Refusing to create temp dir: ancestor is a symlink: " + accumulated);
+		} catch (e) {
+			if (e instanceof Error && e.message.includes("symlink")) throw e;
+			// Component doesn't exist yet — OK, proceed
+			break;
+		}
+	}
+	// Verify base dir itself is not a symlink
 	const baseStat = fs.lstatSync(base);
 	if (baseStat.isSymbolicLink()) throw new Error("Refusing to create temp dir in symlinked base: " + base);
 	// Resolve base to canonical path before joining
@@ -195,6 +215,22 @@ export function buildPiWorkerArgs(input: BuildPiWorkerArgsInput): BuildPiWorkerA
 export function cleanupTempDir(tempDir: string | undefined): void {
 	if (!tempDir) return;
 	try {
+		// CRITICAL: never rmSync a symlink. fs.rmSync with recursive:true
+		// FOLLOWS symlinks — use lstatSync (does not follow) to verify.
+		let lstat: fs.Stats;
+		try {
+			lstat = fs.lstatSync(tempDir);
+		} catch {
+			// Dir doesn't exist or inaccessible — best effort
+			createdTempDirs.delete(tempDir);
+			return;
+		}
+		if (lstat.isSymbolicLink()) {
+			// Symlinks should not be in createdTempDirs (createSafeTempDir
+			// rejects symlinked base dirs), but guard anyway.
+			createdTempDirs.delete(tempDir);
+			return;
+		}
 		fs.rmSync(tempDir, { recursive: true, force: true });
 		createdTempDirs.delete(tempDir);
 	} catch {
@@ -214,6 +250,23 @@ export function cleanupAllTrackedTempDirs(): { cleaned: number; failed: number }
 	// Snapshot to avoid mutation during iteration
 	for (const dir of [...createdTempDirs]) {
 		try {
+			// CRITICAL: never rmSync a symlink. fs.rmSync with recursive:true
+			// FOLLOWS symlinks — use lstatSync to verify first.
+			let lstat: fs.Stats;
+			try {
+				lstat = fs.lstatSync(dir);
+			} catch {
+				// Dir gone or inaccessible — best effort cleanup
+				createdTempDirs.delete(dir);
+				failed++;
+				continue;
+			}
+			if (lstat.isSymbolicLink()) {
+				// Should never happen (createSafeTempDir rejects symlinked
+				// base), but guard anyway to prevent accidental target deletion.
+				createdTempDirs.delete(dir);
+				continue;
+			}
 			fs.rmSync(dir, { recursive: true, force: true });
 			createdTempDirs.delete(dir);
 			cleaned++;

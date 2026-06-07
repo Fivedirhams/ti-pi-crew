@@ -214,6 +214,47 @@ function allRunningTasksHeartbeatStale(
 }
 
 /**
+ * FIX: Find individually stale tasks even when not ALL tasks are stale.
+ * This complements allRunningTasksHeartbeatStale by detecting zombie tasks
+ * that have one or more healthy siblings. A task is individually stale if
+ * it has no heartbeat AND no agent progress (we can't determine staleness)
+ * OR if both heartbeat and activity are stale beyond NO_PID_HEARTBEAT_STALE_MS.
+ */
+function findIndividuallyStaleTaskIds(
+	tasks: TeamTaskState[],
+	now: number,
+): string[] {
+	return tasks
+		.filter((task) => task.status === "running" || task.status === "waiting")
+		.filter((task) => {
+			const heartbeatAt = task.heartbeat?.lastSeenAt
+				? new Date(task.heartbeat.lastSeenAt).getTime()
+				: Number.NaN;
+			const activityAt = task.agentProgress?.lastActivityAt
+				? new Date(task.agentProgress.lastActivityAt).getTime()
+				: Number.NaN;
+			// If no heartbeat AND no activity, we can't determine staleness — skip
+			if (!Number.isFinite(heartbeatAt) && !Number.isFinite(activityAt))
+				return false;
+			// If heartbeat is recent enough, not stale
+			if (
+				Number.isFinite(heartbeatAt) &&
+				now - heartbeatAt <= NO_PID_HEARTBEAT_STALE_MS
+			)
+				return false;
+			// If agent progress is recent enough, not stale
+			if (
+				Number.isFinite(activityAt) &&
+				now - activityAt <= NO_PID_HEARTBEAT_STALE_MS
+			)
+				return false;
+			// Both present and both stale → this task is individually stale
+			return true;
+		})
+		.map((task) => task.id);
+}
+
+/**
  * Repair a stale run by marking it as failed and cancelling running tasks.
  */
 function repairStaleRun(
@@ -307,6 +348,21 @@ export function reconcileStaleRun(
 				repaired: true,
 				detail: `No PID; all running task heartbeats stale >${Math.round(NO_PID_HEARTBEAT_STALE_MS / 60_000)}min; repaired ${repaired.filter((t) => t.status === "cancelled").length} tasks`,
 				repairedTasks: repaired,
+			};
+		}
+		// FIX: Check for individually stale tasks even when not all are stale.
+		// This handles the case where task A is healthy but task B is a zombie.
+		// We repair only the zombie tasks, not the whole run.
+		const staleTaskIds = findIndividuallyStaleTaskIds(tasks, now);
+		if (staleTaskIds.length > 0) {
+			const repaired = repairStaleRun(manifest, tasks, "no_pid_individual_stale_task");
+			// Only return the individually repaired tasks in detail
+			return {
+				runId,
+				verdict: "no_status",
+				repaired: true,
+				detail: `No PID; ${staleTaskIds.length} individually stale task(s) repaired: ${staleTaskIds.join(", ")}`,
+				repairedTasks: repaired.filter((t) => staleTaskIds.includes(t.id)),
 			};
 		}
 		// Fall through: no recent activity but not all tasks stale enough yet.

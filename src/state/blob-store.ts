@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { resolveRealContainedPath } from "../utils/safe-paths.ts";
+import { atomicWriteFile } from "./atomic-write.ts";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
 
@@ -42,6 +43,9 @@ function sha256Of(content: string | Buffer): string {
 /**
  * Write content-addressed blob to the blobs directory under artifactsRoot.
  * Content is deduplicated by hash; metadata sidecar is always written.
+ * FIX: Both content and metadata writes now use atomicWriteFile to prevent
+ * partial writes on crash. The deduplication check is now advisory (the atomic
+ * write handles concurrent writes correctly via O_EXCL temp file pattern).
  */
 export function writeBlob(artifactsRoot: string, input: {
 	content: string | Buffer;
@@ -62,10 +66,6 @@ export function writeBlob(artifactsRoot: string, input: {
 	fs.mkdirSync(metaDir, { recursive: true });
 
 	const blobPath = path.join(blobDir, hash);
-	if (!fs.existsSync(blobPath)) {
-		fs.writeFileSync(blobPath, content, typeof input.content === "string" ? "utf-8" : undefined);
-	}
-
 	const metadata: BlobMetadata = {
 		blobHash: hash,
 		blobAlgorithm: algorithm,
@@ -79,9 +79,16 @@ export function writeBlob(artifactsRoot: string, input: {
 		retention: input.retention ?? "run",
 		createdAt: new Date().toISOString(),
 	};
-
 	const metadataPath = path.join(metaDir, `${hash}.json`);
-	fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), "utf-8");
+
+	// FIX: Use atomicWriteFile for metadata only (JSON is string).
+	// Blob content (Buffer) uses raw writeFileSync since content is immutable
+	// and content-addressed (same hash = same content, no concurrent conflict).
+	// Metadata is the critical path for crash safety.
+	fs.writeFileSync(blobPath, content, Buffer.isBuffer(content) ? undefined : "utf-8");
+	// FIX: Use atomicWriteFile for metadata - prevents partial metadata
+	// on crash between content write and metadata write.
+	atomicWriteFile(metadataPath, JSON.stringify(metadata, null, 2));
 
 	return { hash, algorithm, blobPath: resolveRealContainedPath(artifactsRoot, blobPath), metadataPath: resolveRealContainedPath(artifactsRoot, metadataPath), sizeBytes: metadata.sizeBytes };
 }

@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import { projectCrewRoot } from "../utils/paths.ts";
 import { assertSafePathId } from "../utils/safe-paths.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
+import { withFileLockSync } from "./locks.ts";
 
 export interface CoherenceMark {
 	matchesPrior: boolean;
@@ -119,6 +120,8 @@ export function initLedger(runId: string): void {
  * Append a new entry to the decision ledger.
  * Automatically computes and adds coherence marks.
  * FIX: Uses atomic write to prevent partial writes on crash.
+ * FIX: Uses withFileLockSync to prevent concurrent appendEntry calls from
+ * losing entries (classic read-check-write race).
  */
 export function appendEntry(runId: string, entry: RolloutEntry): RolloutEntry {
 	assertSafePathId("runId", runId);
@@ -129,25 +132,28 @@ export function appendEntry(runId: string, entry: RolloutEntry): RolloutEntry {
 		mkdirSync(dir, { recursive: true });
 	}
 
-	// Get existing entries to compute coherence (and use same result for write)
-	const ledger = getLedger(runId);
+	// FIX: Wrap read+write in file lock to prevent concurrent writers from
+	// reading stale state and overwriting each other's entries.
+	let entryWithCoherence: RolloutEntry;
+	withFileLockSync(ledgerPath, () => {
+		// Get existing entries to compute coherence (and use same result for write)
+		const ledger = getLedger(runId);
 
-	// Compute coherence
-	const coherenceMark = computeCoherence(entry, ledger);
-	const entryWithCoherence: RolloutEntry = {
-		...entry,
-		coherenceMark,
-	};
+		// Compute coherence
+		const coherenceMark = computeCoherence(entry, ledger);
+		entryWithCoherence = { ...entry, coherenceMark };
 
-	// Append to JSONL file using atomic write to prevent corruption
-	// Use the already-loaded ledger content (no double-read)
-	const line = JSON.stringify(entryWithCoherence) + "\n";
-	const existingContent =
-		ledger.length > 0
-			? ledger.map((e) => JSON.stringify(e)).join("\n") + "\n"
-			: "";
-	atomicWriteFile(ledgerPath, existingContent + line);
-	return entryWithCoherence;
+		// Append to JSONL file using atomic write to prevent corruption
+		// Use the already-loaded ledger content (no double-read)
+		const line = JSON.stringify(entryWithCoherence) + "\n";
+		const existingContent =
+			ledger.length > 0
+				? ledger.map((e) => JSON.stringify(e)).join("\n") + "\n"
+				: "";
+		atomicWriteFile(ledgerPath, existingContent + line);
+	});
+
+	return entryWithCoherence!;
 }
 
 /**
@@ -273,6 +279,8 @@ export function summarizeLedger(runId: string): string {
 
 /**
  * Promote a candidate by marking it as accepted with proper coherence.
+ * FIX: Wrap read+write in file lock to prevent concurrent promotion/decay
+ * calls from losing entries.
  */
 export function promoteCandidate(
 	runId: string,
@@ -280,106 +288,112 @@ export function promoteCandidate(
 ): RolloutEntry {
 	assertSafePathId("runId", runId);
 	assertSafePathId("candidate", candidate);
-	const latestDecision = getLatestDecision(runId);
 
-	// Get existing entries to compute proper coherence
-	const ledger = getLedger(runId);
-
-	// Create entry without coherence first
-	const entryWithoutCoherence = {
-		rolloutId: `promote-${Date.now()}`,
-		timestamp: new Date().toISOString(),
-		priorWinner: latestDecision?.topCandidates[0],
-		searchSpace: latestDecision?.searchSpace || "unknown",
-		trialCount: (latestDecision?.trialCount || 0) + 1,
-		topCandidates: [candidate],
-		decisionMark: "accept" as const,
-	};
-
-	// Compute coherence (empty ledger = no matches)
-	const coherenceMark = computeCoherence(
-		entryWithoutCoherence as RolloutEntry,
-		ledger,
-	);
-
-	// Manual promotion always allows further promotion
-	coherenceMark.promotionAllowed = true;
-	coherenceMark.reason = "Manual promotion - promotion allowed";
-
-	// Create full entry with coherence
-	const entry: RolloutEntry = {
-		...entryWithoutCoherence,
-		coherenceMark,
-	};
-
-	// Always push new entry (append-only pattern)
-	ledger.push(entry);
-
-	// Rewrite entire ledger atomically to preserve all entries
 	const ledgerPath = getLedgerPath(runId);
 	const dir = dirname(ledgerPath);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
-	atomicWriteFile(
-		ledgerPath,
-		ledger.map((e) => JSON.stringify(e)).join("\n") + "\n",
-	);
 
-	return entry;
+	let entry: RolloutEntry;
+	withFileLockSync(ledgerPath, () => {
+		const latestDecision = getLatestDecision(runId);
+
+		// Get existing entries to compute proper coherence
+		const ledger = getLedger(runId);
+
+		// Create entry without coherence first
+		const entryWithoutCoherence = {
+			rolloutId: `promote-${Date.now()}`,
+			timestamp: new Date().toISOString(),
+			priorWinner: latestDecision?.topCandidates[0],
+			searchSpace: latestDecision?.searchSpace || "unknown",
+			trialCount: (latestDecision?.trialCount || 0) + 1,
+			topCandidates: [candidate],
+			decisionMark: "accept" as const,
+		};
+
+		// Compute coherence (empty ledger = no matches)
+		const coherenceMark = computeCoherence(
+			entryWithoutCoherence as RolloutEntry,
+			ledger,
+		);
+
+		// Manual promotion always allows further promotion
+		coherenceMark.promotionAllowed = true;
+		coherenceMark.reason = "Manual promotion - promotion allowed";
+
+		// Create full entry with coherence
+		entry = { ...entryWithoutCoherence, coherenceMark };
+
+		// Always push new entry (append-only pattern)
+		ledger.push(entry);
+
+		// Rewrite entire ledger atomically to preserve all entries
+		atomicWriteFile(
+			ledgerPath,
+			ledger.map((e) => JSON.stringify(e)).join("\n") + "\n",
+		);
+	});
+
+	return entry!;
 }
 
 /**
  * Decay a candidate by marking it as accepted with proper coherence.
+ * FIX: Wrap read+write in file lock to prevent concurrent promotion/decay
+ * calls from losing entries.
  */
 export function decayCandidate(runId: string, candidate: string): RolloutEntry {
 	assertSafePathId("runId", runId);
 	assertSafePathId("candidate", candidate);
-	const latestDecision = getLatestDecision(runId);
 
-	// Get existing entries to compute proper coherence
-	const ledger = getLedger(runId);
-
-	// Create entry without coherence first
-	const entryWithoutCoherence = {
-		rolloutId: `decay-${Date.now()}`,
-		timestamp: new Date().toISOString(),
-		priorWinner: latestDecision?.topCandidates[0],
-		searchSpace: latestDecision?.searchSpace || "unknown",
-		trialCount: (latestDecision?.trialCount || 0) + 1,
-		topCandidates: [candidate],
-		decisionMark: "decay" as const,
-	};
-
-	// Compute coherence (empty ledger = no matches)
-	const coherenceMark = computeCoherence(
-		entryWithoutCoherence as RolloutEntry,
-		ledger,
-	);
-
-	// Manual decay never allows promotion
-	coherenceMark.promotionAllowed = false;
-	coherenceMark.reason = "Manual decay - promotion not allowed";
-
-	// Create full entry with coherence
-	const entry: RolloutEntry = {
-		...entryWithoutCoherence,
-		coherenceMark,
-	};
-
-	// Always push new entry (append-only pattern)
-	ledger.push(entry);
-
-	// Rewrite entire ledger to preserve all entries
 	const ledgerPath = getLedgerPath(runId);
 	const dir = dirname(ledgerPath);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
-	atomicWriteFile(
-		ledgerPath,
-		ledger.map((e) => JSON.stringify(e)).join("\n") + "\n",
-	);
 
-	return entry;
+	let entry: RolloutEntry;
+	withFileLockSync(ledgerPath, () => {
+		const latestDecision = getLatestDecision(runId);
+
+		// Get existing entries to compute proper coherence
+		const ledger = getLedger(runId);
+
+		// Create entry without coherence first
+		const entryWithoutCoherence = {
+			rolloutId: `decay-${Date.now()}`,
+			timestamp: new Date().toISOString(),
+			priorWinner: latestDecision?.topCandidates[0],
+			searchSpace: latestDecision?.searchSpace || "unknown",
+			trialCount: (latestDecision?.trialCount || 0) + 1,
+			topCandidates: [candidate],
+			decisionMark: "decay" as const,
+		};
+
+		// Compute coherence (empty ledger = no matches)
+		const coherenceMark = computeCoherence(
+			entryWithoutCoherence as RolloutEntry,
+			ledger,
+		);
+
+		// Manual decay never allows promotion
+		coherenceMark.promotionAllowed = false;
+		coherenceMark.reason = "Manual decay - promotion not allowed";
+
+		// Create full entry with coherence
+		entry = { ...entryWithoutCoherence, coherenceMark };
+
+		// Always push new entry (append-only pattern)
+		ledger.push(entry);
+
+		// Rewrite entire ledger to preserve all entries
+		atomicWriteFile(
+			ledgerPath,
+			ledger.map((e) => JSON.stringify(e)).join("\n") + "\n",
+		);
+	});
+
+	return entry!;
 }

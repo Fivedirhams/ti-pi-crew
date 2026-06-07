@@ -9,6 +9,12 @@ const RETRYABLE_RENAME_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
  * Symlink-safe file write guard (caveman-inspired).
  * Returns true if the path is safe to write, false if it's a symlink or
  * inside a symlinked directory owned by another user.
+ *
+ * Note: This only checks the immediate parent directory, not the full
+ * ancestor chain. The full ancestor chain check is done in createSafeTempDir
+ * (pi-args.ts) before mkdtemp. Here we rely on O_NOFOLLOW + post-open
+ * fstat verification for symlink protection, plus path containment
+ * validation done by callers via resolveRealContainedPath.
  */
 function isSymlinkSafePath(filePath: string): boolean {
 	try {

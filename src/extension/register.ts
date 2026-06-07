@@ -450,12 +450,13 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 					// processes left behind. Catches anything Layers 1-3 missed.
 					const orphanResult = cleanupOrphanTempDirs();
 					if (orphanResult.cleaned > 0) {
-						logInternalError(
-							"register.tempAutoRepair.orphanTemp",
-							new Error(
-								`cleaned ${orphanResult.cleaned} orphan temp dirs`,
-							),
-						);
+						notifyOperator({
+							id: `layer4_temp_cleanup_${Date.now()}`,
+							severity: "info",
+							source: "temp-cleanup",
+							title: `Layer 4: cleaned ${orphanResult.cleaned} orphan temp dir(s)`,
+							body: `~/.pi/agent/pi-crew/tmp/ orphans older than 24h removed (scanned ${orphanResult.scanned}, failed ${orphanResult.failed}).`,
+						});
 					}
 					// Layer 5: clean legacy /tmp/pi-crew-* prompt/task orphans
 					// from before commit 8ba270d moved temp dirs out of /tmp.
@@ -464,12 +465,13 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 					// prompt/task orphans are never touched by Layer 3.
 					const legacyResult = cleanupLegacyOrphanTempDirs();
 					if (legacyResult.cleaned > 0) {
-						logInternalError(
-							"register.tempAutoRepair.legacyOrphanTemp",
-							new Error(
-								`cleaned ${legacyResult.cleaned} legacy /tmp/pi-crew-* orphans`,
-							),
-						);
+						notifyOperator({
+							id: `layer5_legacy_temp_cleanup_${Date.now()}`,
+							severity: "info",
+							source: "temp-cleanup",
+							title: `Layer 5: cleaned ${legacyResult.cleaned} legacy /tmp/pi-crew-* orphan(s)`,
+							body: `Pre-fix /tmp/pi-crew-* prompt/task orphans (no .crew/state/runs/, >24h) removed (scanned ${legacyResult.scanned}, failed ${legacyResult.failed}).`,
+						});
 					}
 				} catch (error) {
 					logInternalError("register.tempAutoRepair", error);
@@ -1256,12 +1258,13 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 					const orphanTmp = cleanupOrphanTempDirs();
 					const legacyTmp = cleanupLegacyOrphanTempDirs();
 					if (orphanTmp.cleaned > 0 || legacyTmp.cleaned > 0) {
-						logInternalError(
-							"register.sessionStart.startupTempCleanup",
-							new Error(
-								`cleaned ${orphanTmp.cleaned} user-tmp + ${legacyTmp.cleaned} legacy /tmp dirs`,
-							),
-						);
+						notifyOperator({
+							id: `startup_temp_cleanup_${Date.now()}`,
+							severity: "info",
+							source: "temp-cleanup",
+							title: `Startup cleanup: removed ${orphanTmp.cleaned + legacyTmp.cleaned} orphan temp dir(s)`,
+							body: `${orphanTmp.cleaned} from ~/.pi/agent/pi-crew/tmp/ + ${legacyTmp.cleaned} legacy /tmp/pi-crew-*`,
+						});
 					}
 				} catch (error) {
 					logInternalError(
@@ -1279,12 +1282,13 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 				try {
 					const orphanWorkers = cleanupOrphanWorkers(currentSessionId);
 					if (orphanWorkers.killed > 0) {
-						logInternalError(
-							"register.sessionStart.orphanWorkers",
-							new Error(
-								`killed ${orphanWorkers.killed} orphan background workers (pruned ${orphanWorkers.pruned} dead, kept ${orphanWorkers.kept})`,
-							),
-						);
+						notifyOperator({
+							id: `orphan_workers_cleanup`,
+							severity: "info",
+							source: "worker-cleanup",
+							title: `Cleaned up ${orphanWorkers.killed} orphan worker(s)`,
+							body: `Background workers from previous (SIGKILL'd) sessions were terminated (pruned ${orphanWorkers.pruned} dead, kept ${orphanWorkers.kept}).`,
+						});
 					}
 				} catch (error) {
 					logInternalError(
