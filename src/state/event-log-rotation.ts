@@ -111,8 +111,9 @@ export function compactEventLog(eventsPath: string, config?: Partial<RotationCon
 				try {
 					// Use atomicWriteFile for recovery append too — safer than plain appendFileSync
 					atomicWriteFile(eventsPath, JSON.stringify(event) + "\n");
-				} catch {
-					// Append failed — log but don't throw.
+				} catch (err) {
+					// FIX: Log when recovery append fails to avoid silent event loss
+					logInternalError("event-log-rotation.recovery", err, `eventsPath=${eventsPath} lostEvent=${JSON.stringify(event).slice(0, 100)}`);
 				}
 			}
 			return {

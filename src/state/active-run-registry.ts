@@ -212,10 +212,14 @@ function writeEntries(entries: ActiveRunRegistryEntry[]): void {
 			// Binary succeeded, JSON failed — try to recover JSON from temp
 			try { renameWithRetry(tempJson, registryPath()); jsonRenamed = true; } catch { /* recovery failed */ }
 		}
-		// If recovery failed or both failed, delete any partial registry files to keep consistent
-		if (!binRenamed || !jsonRenamed) {
-			try { fs.rmSync(registryPath(), { force: true }); } catch { /* best-effort */ }
+		// If recovery failed, only delete files that were NOT successfully renamed.
+		// Deleting a successfully renamed file would cause data loss.
+		// Keep whichever registry was successfully written.
+		if (!binRenamed) {
 			try { fs.rmSync(registryBinaryPath(), { force: true }); } catch { /* best-effort */ }
+		}
+		if (!jsonRenamed) {
+			try { fs.rmSync(registryPath(), { force: true }); } catch { /* best-effort */ }
 		}
 		try { fs.rmSync(tempJson, { force: true }); } catch { /* best-effort */ }
 		try { fs.rmSync(tempBin, { force: true }); } catch { /* best-effort */ }

@@ -140,9 +140,20 @@ export function writeBlob(artifactsRoot: string, input: {
 	// Issue 3 fix: wrap metadata check-and-write in a lock to make it atomic.
 	// Without the lock, two processes could read the same metadata concurrently,
 	// both pass the check, and the second write would silently overwrite the first.
-	let blobWritten = false;
+	// FIX: Write blob content FIRST, then metadata. If blob write fails, no orphan metadata.
+	// Previous order was metadata first, then blob - causing orphan metadata on blob failure.
+	let blobContentWritten = false;
 	try {
-		// Use per-hash lock to make check-then-write atomic for metadata.
+		// Write blob content first (immutable, content-addressed)
+		atomicWriteBuffer(blobPath, Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
+		blobContentWritten = true;
+	} catch (error) {
+		// Blob write failed - no metadata to clean up since we haven't written it yet
+		throw error;
+	}
+
+	// Metadata only after blob content is successfully written
+	try {
 		withMetadataLock(hash, () => {
 			try {
 				const existingMeta = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as BlobMetadata;
@@ -154,23 +165,17 @@ export function writeBlob(artifactsRoot: string, input: {
 					throw new Error(`Concurrent metadata write conflict for blob ${hash}: different metadata values detected. Existing: ${JSON.stringify(existingMeta)}, New: ${JSON.stringify(metadata)}`);
 				}
 			} catch (err) {
-				// If file doesn't exist, that's fine - we'll create it
 				if (err instanceof Error && err.message.includes("ENOENT")) {
 					// OK - metadata doesn't exist yet
 				} else {
 					throw err;
 				}
 			}
-			// Use atomicWriteFile for metadata - prevents partial metadata on crash.
-			// Both content and metadata writes are now atomic, ensuring that either both
-			// succeed or neither persists, preventing orphan blobs without metadata.
 			atomicWriteFile(metadataPath, JSON.stringify(metadata, null, 2));
 		});
-		atomicWriteBuffer(blobPath, Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
-		blobWritten = true;
 	} catch (error) {
-		// If metadata write failed after blob succeeded, clean up the orphan blob
-		if (blobWritten) {
+		// Metadata write failed - clean up the orphaned blob content
+		if (blobContentWritten) {
 			try { fs.rmSync(blobPath, { force: true }); } catch { /* best-effort */ }
 		}
 		throw error;
