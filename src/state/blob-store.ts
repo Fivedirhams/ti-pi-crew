@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { resolveRealContainedPath } from "../utils/safe-paths.ts";
 import { atomicWriteFile, renameWithRetry } from "./atomic-write.ts";
+import { sleepSync } from "../utils/sleep.ts";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
 
@@ -41,6 +42,28 @@ function atomicWriteBuffer(filePath: string, content: Buffer): void {
 const BLOBS_DIR = "blobs";
 const BLOB_META_DIR = "blob-metadata";
 const SHA256_PREFIX = "sha256";
+
+/** Per-hash metadata lock to prevent concurrent write races for the same blob. */
+const metadataLocks = new Map<string, { count: number; lockHeld: boolean }>();
+const METADATA_LOCK_TIMEOUT_MS = 5000;
+
+function withMetadataLock<T>(hash: string, fn: () => T): T {
+	const entry = metadataLocks.get(hash) ?? { count: 0, lockHeld: false };
+	const start = Date.now();
+	while (entry.lockHeld) {
+		if (Date.now() - start > METADATA_LOCK_TIMEOUT_MS) {
+			throw new Error(`Metadata lock timeout for blob ${hash}`);
+		}
+		sleepSync(5);
+	}
+	entry.lockHeld = true;
+	metadataLocks.set(hash, entry);
+	try {
+		return fn();
+	} finally {
+		entry.lockHeld = false;
+	}
+}
 
 export interface BlobMetadata {
 	blobHash: string;
@@ -112,38 +135,39 @@ export function writeBlob(artifactsRoot: string, input: {
 	// Both content and metadata use atomic writes to prevent partial writes on crash.
 	// Content is immutable and content-addressed (same hash = same content), so
 	// concurrent writes to the same hash are safe. Metadata (mime, retention, etc.)
-	// is written atomically via atomicWriteFile to prevent race conditions between
-	// concurrent writers that might have different metadata values.
-	// Issue 1 fix: detect concurrent metadata writes with different values by checking
-	// existing metadata before writing. If metadata exists and differs (except createdAt),
-	// throw an error to prevent silent corruption.
+	// is protected by a per-hash lock to make the check-then-write atomic, preventing
+	// concurrent writers from racing to write different metadata for the same hash.
+	// Issue 3 fix: wrap metadata check-and-write in a lock to make it atomic.
+	// Without the lock, two processes could read the same metadata concurrently,
+	// both pass the check, and the second write would silently overwrite the first.
 	let blobWritten = false;
 	try {
-		// Check for concurrent metadata write conflict before writing
-		try {
-			const existingMeta = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as BlobMetadata;
-			// Compare fields that indicate concurrent write with different metadata
-			if (existingMeta.mime !== metadata.mime ||
-				existingMeta.retention !== metadata.retention ||
-				existingMeta.producer !== metadata.producer ||
-				existingMeta.originalPath !== metadata.originalPath) {
-				throw new Error(`Concurrent metadata write conflict for blob ${hash}: different metadata values detected. Existing: ${JSON.stringify(existingMeta)}, New: ${JSON.stringify(metadata)}`);
+		// Use per-hash lock to make check-then-write atomic for metadata.
+		withMetadataLock(hash, () => {
+			try {
+				const existingMeta = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as BlobMetadata;
+				// Compare fields that indicate concurrent write with different metadata
+				if (existingMeta.mime !== metadata.mime ||
+					existingMeta.retention !== metadata.retention ||
+					existingMeta.producer !== metadata.producer ||
+					existingMeta.originalPath !== metadata.originalPath) {
+					throw new Error(`Concurrent metadata write conflict for blob ${hash}: different metadata values detected. Existing: ${JSON.stringify(existingMeta)}, New: ${JSON.stringify(metadata)}`);
+				}
+			} catch (err) {
+				// If file doesn't exist, that's fine - we'll create it
+				if (err instanceof Error && err.message.includes("ENOENT")) {
+					// OK - metadata doesn't exist yet
+				} else {
+					throw err;
+				}
 			}
-		} catch (err) {
-			// If file doesn't exist, that's fine - we'll create it
-			if (err instanceof Error && err.message.includes("ENOENT")) {
-				// OK - metadata doesn't exist yet
-			} else {
-				throw err;
-			}
-		}
-
+			// Use atomicWriteFile for metadata - prevents partial metadata on crash.
+			// Both content and metadata writes are now atomic, ensuring that either both
+			// succeed or neither persists, preventing orphan blobs without metadata.
+			atomicWriteFile(metadataPath, JSON.stringify(metadata, null, 2));
+		});
 		atomicWriteBuffer(blobPath, Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
 		blobWritten = true;
-		// Use atomicWriteFile for metadata - prevents partial metadata on crash.
-		// Both content and metadata writes are now atomic, ensuring that either both
-		// succeed or neither persists, preventing orphan blobs without metadata.
-		atomicWriteFile(metadataPath, JSON.stringify(metadata, null, 2));
 	} catch (error) {
 		// If metadata write failed after blob succeeded, clean up the orphan blob
 		if (blobWritten) {
