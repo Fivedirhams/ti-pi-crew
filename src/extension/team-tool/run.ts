@@ -2,6 +2,7 @@ import { allAgents, discoverAgents } from "../../agents/discover-agents.ts";
 import { allTeams, discoverTeams } from "../../teams/discover-teams.ts";
 import { allWorkflows, discoverWorkflows } from "../../workflows/discover-workflows.ts";
 import { loadConfig } from "../../config/config.ts";
+import { findGitRoot } from "../../worktree/worktree-manager.ts";
 import type { TeamToolParamsValue } from "../../schema/team-tool-schema.ts";
 import { writeArtifact } from "../../state/artifact-store.ts";
 import { registerActiveRun, unregisterActiveRun } from "../../state/active-run-registry.ts";
@@ -60,7 +61,7 @@ function tailFile(filePath: string, maxBytes = 4096): string | undefined {
 function scheduleBackgroundEarlyExitGuard(cwd: string, runId: string, pid: number | undefined, logPath: string): void {
 	if (process.env.PI_CREW_ASYNC_EARLY_EXIT_GUARD === "0") return;
 	const timer = setTimeout(() => {
-		const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
+		const loaded = loadRunManifestById(cwd, runId);
 		if (!loaded || !isActiveRunStatus(loaded.manifest.status)) return;
 		if (hasAsyncStartMarker(loaded.manifest)) return;
 		if (readEvents(loaded.manifest.eventsPath).some((event) => event.type === "async.started" || event.type === "async.completed" || event.type === "async.failed")) return;
@@ -85,9 +86,24 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	const { ensureCrewDirectory } = await import("../../state/crew-init.ts");
 	await ensureCrewDirectory(workingDir);
 
-	const teams = allTeams(discoverTeams(ctx.cwd));
-	const workflows = allWorkflows(discoverWorkflows(ctx.cwd));
-	const agents = allAgents(discoverAgents(ctx.cwd));
+	// WORKTREE FIX: If worktree mode is needed but cwd is not a git repo,
+	// auto-correct to the nearest git repo root. This prevents "not a git repository"
+	// errors when ctx.cwd points to a parent directory that isn't a git repo.
+	let resolvedCtx = ctx;
+	if (workingDir) {
+		try {
+			const gitRoot = findGitRoot(workingDir);
+			if (gitRoot && gitRoot !== workingDir) {
+				resolvedCtx = { ...ctx, cwd: gitRoot };
+			}
+		} catch {
+			// cwd is not in a git repo — will be handled later if worktree mode is needed
+		}
+	}
+
+	const teams = allTeams(discoverTeams(resolvedCtx.cwd));
+	const workflows = allWorkflows(discoverWorkflows(resolvedCtx.cwd));
+	const agents = allAgents(discoverAgents(resolvedCtx.cwd));
 	const directAgent = params.agent ? agents.find((item) => item.name === params.agent) : undefined;
 	if (params.agent && !directAgent) return result(`Agent '${params.agent}' not found.`, { action: "run", status: "error" }, true);
 	const teamName = params.team ?? "default";
@@ -110,7 +126,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 		steps: [{ id: "01_agent", role: params.role ?? "agent", task: "{goal}", model: params.model }],
 	} : workflows.find((item) => item.name === workflowName);
 	if (!baseWorkflow) return result(`Workflow '${workflowName}' not found.`, { action: "run", status: "error" }, true);
-	const workflow = directAgent ? baseWorkflow : expandParallelResearchWorkflow(baseWorkflow, ctx.cwd);
+	const workflow = directAgent ? baseWorkflow : expandParallelResearchWorkflow(baseWorkflow, resolvedCtx.cwd);
 
 	// Check if this is a pipeline workflow - special handling for multi-stage execution
 	const isPipelineWorkflow = workflowName === "pipeline" && !directAgent;
@@ -152,7 +168,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 
 	const skillOverride = normalizeSkillOverride(params.skill);
 	const { manifest, tasks, paths } = createRunManifest({
-		cwd: ctx.cwd,
+		cwd: resolvedCtx.cwd,
 		team,
 		workflow,
 		goal,
@@ -169,7 +185,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	atomicWriteJson(paths.manifestPath, updatedManifest);
 	registerActiveRun(updatedManifest);
 
-	const loadedConfig = loadConfig(ctx.cwd);
+	const loadedConfig = loadConfig(resolvedCtx.cwd);
 	const executedConfig = effectiveRunConfig(loadedConfig.config, params.config);
 	const runtime = await resolveCrewRuntime(executedConfig);
 	const runtimeResolution = runtimeResolutionState(runtime);
@@ -205,11 +221,11 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 		const asyncManifest = { ...effectiveManifest, async: { pid: spawned.pid, logPath: spawned.logPath, spawnedAt: new Date().toISOString() } };
 		atomicWriteJson(paths.manifestPath, asyncManifest);
 		void appendEventAsync(effectiveManifest.eventsPath, { type: "async.spawned", runId: effectiveManifest.runId, data: { pid: spawned.pid, logPath: spawned.logPath } });
-		scheduleBackgroundEarlyExitGuard(ctx.cwd, effectiveManifest.runId, spawned.pid, spawned.logPath);
+		scheduleBackgroundEarlyExitGuard(resolvedCtx.cwd, effectiveManifest.runId, spawned.pid, spawned.logPath);
 		// Wait for the async run to complete and return actual results.
 		try {
-			const completed = await waitForRun(updatedManifest.runId, ctx.cwd, { timeoutMs: 3600000 });
-			const metrics = collectRunMetrics(ctx.cwd, completed.manifest.runId);
+			const completed = await waitForRun(updatedManifest.runId, resolvedCtx.cwd, { timeoutMs: 3600000 });
+			const metrics = collectRunMetrics(resolvedCtx.cwd, completed.manifest.runId);
 			const lines: string[] = [
 				`pi-crew run ${completed.manifest.status}: ${completed.manifest.runId} (${team.name})`,
 				`Goal: ${goal.slice(0, 100)}`,
@@ -341,8 +357,8 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 
 		// Wait for the foreground run to complete and return actual results.
 		try {
-			const completed = await waitForRun(updatedManifest.runId, ctx.cwd, { timeoutMs: 3600000 });
-			const metrics = collectRunMetrics(ctx.cwd, completed.manifest.runId);
+			const completed = await waitForRun(updatedManifest.runId, resolvedCtx.cwd, { timeoutMs: 3600000 });
+			const metrics = collectRunMetrics(resolvedCtx.cwd, completed.manifest.runId);
 			const lines: string[] = [
 				`pi-crew run ${completed.manifest.status}: ${completed.manifest.runId} (${team.name})`,
 				`Goal: ${goal.slice(0, 100)}`,
