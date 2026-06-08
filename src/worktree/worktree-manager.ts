@@ -162,7 +162,7 @@ function runSetupHook(manifest: TeamRunManifest, task: TeamTaskState, repoRoot: 
 			timeout: cfg.setupHookTimeoutMs ?? 30_000,
 			shell: false,  // cmd.exe /c handles batch files safely
 			env: sanitizeEnvSecrets(process.env, {
-				allowList: ["PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "PI_*"],
+				allowList: ["PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"],
 			}),
 			windowsHide: true,
 		})
@@ -173,7 +173,7 @@ function runSetupHook(manifest: TeamRunManifest, task: TeamTaskState, repoRoot: 
 			timeout: cfg.setupHookTimeoutMs ?? 30_000,
 			shell: useShell,
 			env: sanitizeEnvSecrets(process.env, {
-				allowList: ["PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "PI_*"],
+				allowList: ["PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"],
 			}),
 			windowsHide: true,
 		});

@@ -214,20 +214,59 @@ export function saveRunManifest(manifest: TeamRunManifest): void {
 	// invalidation, the stale cache entry (up to MANIFEST_CACHE_TTL_MS old)
 	// could be served by another process.
 	invalidateRunCache(manifest.stateRoot);
-	atomicWriteJson(path.join(manifest.stateRoot, "manifest.json"), manifest);
+	const manifestPath = path.join(manifest.stateRoot, "manifest.json");
+	atomicWriteJson(manifestPath, manifest);
+	// FIX: Re-populate cache with actual mtime/size so loadRunManifestById
+	// doesn't miss the cache on next read. Without this, every load until
+	// TTL expires would hit disk because cached 0 !== any real mtime.
+	const manifestStat = fs.statSync(manifestPath);
+	setManifestCache(manifest.stateRoot, {
+		manifest,
+		tasks: [],
+		manifestMtimeMs: manifestStat.mtimeMs,
+		manifestSize: manifestStat.size,
+		tasksMtimeMs: 0,
+		tasksSize: 0,
+	});
 }
 
 export async function saveRunManifestAsync(manifest: TeamRunManifest): Promise<void> {
 	// FIX: Invalidate cache BEFORE atomic write to prevent stale cache serving
 	// after a crash. See saveRunManifest for full explanation.
 	invalidateRunCache(manifest.stateRoot);
-	await atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest);
+	const manifestPath = path.join(manifest.stateRoot, "manifest.json");
+	await atomicWriteJsonAsync(manifestPath, manifest);
+	// FIX: Re-populate cache with actual mtime/size. See saveRunManifest.
+	const manifestStat = await fs.promises.stat(manifestPath);
+	setManifestCache(manifest.stateRoot, {
+		manifest,
+		tasks: [],
+		manifestMtimeMs: manifestStat.mtimeMs,
+		manifestSize: manifestStat.size,
+		tasksMtimeMs: 0,
+		tasksSize: 0,
+	});
 }
 
 export function saveRunTasks(manifest: TeamRunManifest, tasks: TeamTaskState[]): void {
 	// FIX: Invalidate cache BEFORE atomic write to prevent stale cache serving.
 	invalidateRunCache(manifest.stateRoot);
 	atomicWriteJson(manifest.tasksPath, tasks);
+	// FIX: Re-populate cache with actual mtime/size for manifest and tasks.
+	// Note: We re-read manifest from disk to get its current mtime/size
+	// since we only wrote tasks here.
+	const manifestPath = path.join(manifest.stateRoot, "manifest.json");
+	const manifestStat = fs.statSync(manifestPath);
+	const tasksStat = fs.statSync(manifest.tasksPath);
+	const cached = manifestCache.get(manifest.stateRoot);
+	setManifestCache(manifest.stateRoot, {
+		manifest: cached?.manifest ?? { runId: manifest.runId } as TeamRunManifest,
+		tasks,
+		manifestMtimeMs: manifestStat.mtimeMs,
+		manifestSize: manifestStat.size,
+		tasksMtimeMs: tasksStat.mtimeMs,
+		tasksSize: tasksStat.size,
+	});
 }
 
 /**

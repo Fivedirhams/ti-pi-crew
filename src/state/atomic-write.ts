@@ -160,6 +160,17 @@ export function atomicWriteFile(filePath: string, content: string, expectedHash?
 		fs.writeSync(fd, content, undefined, "utf-8");
 		fs.closeSync(fd);
 		try {
+		// Issue 1 fix: re-check symlink safety immediately before rename.
+		// Between the initial isSymlinkSafePath check (line 147) and here,
+		// an attacker with control of an ancestor directory could plant a
+		// symlink at the target path. If rename succeeds with a symlink at
+		// target, the symlink is atomically replaced with attacker's content.
+		// The post-rename lstat check only runs on rename failure, so we must
+		// check BEFORE the rename to catch this TOCTOU race.
+		if (!isSymlinkSafePath(filePath)) {
+			try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
+			throw new Error(`Refusing to rename: target became a symlink or inside untrusted directory: ${filePath}`);
+		}
 			renameWithRetry(tempPath, filePath);
 		} catch (renameError) {
 			// H3 fix: re-check symlink safety before fallback.
