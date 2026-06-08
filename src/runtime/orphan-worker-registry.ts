@@ -62,13 +62,14 @@ export interface OrphanWorkerEntry {
  * the actual script being executed, not just a string that happens to
  * appear somewhere in the command line.
  *
- * NOTE: On non-Linux platforms (macOS, Windows), /proc is unavailable,
+ * NOTE: PID reuse protection via cmdline verification is Linux-only.
+ * On non-Linux platforms (macOS, Windows), /proc is unavailable,
  * so this function falls back to trusting the registry. This means
- * PID reuse protection is absent on those platforms — a malicious
- * process could win a PID race and be incorrectly identified as a
- * background-runner, or a legitimate worker could be killed if its
- * PID is reused by an attacker. Consider alternative verification
- * methods (e.g., process name via psutil) for non-Linux platforms.
+ * a malicious process could win a PID race and be incorrectly
+ * identified as a background-runner, or a legitimate worker could
+ * be killed if its PID is reused by an attacker. Consider
+ * alternative verification methods (e.g., process name via psutil)
+ * for non-Linux platforms.
  */
 /**
  * Get process start time in milliseconds since boot from /proc/<pid>/stat.
@@ -162,7 +163,7 @@ function readRegistry(): OrphanWorkerEntry[] {
 function writeRegistry(entries: OrphanWorkerEntry[]): void {
 	const p = getRegistryPath();
 	try {
-		fs.mkdirSync(path.dirname(p), { recursive: true });
+		fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
 		fs.writeFileSync(p, JSON.stringify(entries, null, 2), { mode: 0o600 });
 	} catch (error) {
 		logInternalError(
@@ -285,6 +286,14 @@ export function cleanupOrphanWorkers(
 				// has changed, this is a different process and we must not kill it.
 				const currentStartTime = getProcessStartTime(entry.pid);
 				if (currentStartTime !== undefined && entry.startTime !== 0 && currentStartTime !== entry.startTime) {
+					// PID was recycled — different process now, prune without killing
+					pruned++;
+					continue;
+				}
+				// Re-verify start time immediately before SIGKILL to close the
+				// TOCTOU window between the earlier check (line 286) and here.
+				const preKillStartTime = getProcessStartTime(entry.pid);
+				if (preKillStartTime !== undefined && entry.startTime !== 0 && preKillStartTime !== entry.startTime) {
 					// PID was recycled — different process now, prune without killing
 					pruned++;
 					continue;

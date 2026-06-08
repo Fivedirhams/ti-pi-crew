@@ -34,7 +34,7 @@ export function sendAgentWakeUp(pi: ExtensionAPI, content: string): boolean {
 
 export function refreshPersistedSubagentRecord(ctx: ExtensionContext | ExtensionCommandContext, record: SubagentRecord): SubagentRecord {
 	if (!record.runId) return record;
-	const loaded = loadRunManifestById(ctx.cwd, record.runId);
+	const loaded = loadRunManifestById(ctx.cwd, record.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return record;
 	if (loaded.manifest.status === "completed" || loaded.manifest.status === "failed" || loaded.manifest.status === "cancelled" || loaded.manifest.status === "blocked") {
 		const refreshed = {
@@ -65,7 +65,7 @@ export function formatSubagentRecord(record: SubagentRecord): string {
 
 export function readSubagentRunResult(ctx: ExtensionContext | ExtensionCommandContext, record: SubagentRecord): string | undefined {
 	if (!record.runId) return record.result;
-	const loaded = loadRunManifestById(ctx.cwd, record.runId);
+	const loaded = loadRunManifestById(ctx.cwd, record.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	const task = loaded?.tasks.find((item) => item.resultArtifact) ?? loaded?.tasks[0];
 	const artifactPath = task?.resultArtifact?.path;
 	if (!artifactPath || !loaded) return undefined;

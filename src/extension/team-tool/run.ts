@@ -60,7 +60,7 @@ function tailFile(filePath: string, maxBytes = 4096): string | undefined {
 function scheduleBackgroundEarlyExitGuard(cwd: string, runId: string, pid: number | undefined, logPath: string): void {
 	if (process.env.PI_CREW_ASYNC_EARLY_EXIT_GUARD === "0") return;
 	const timer = setTimeout(() => {
-		const loaded = loadRunManifestById(cwd, runId);
+		const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		if (!loaded || !isActiveRunStatus(loaded.manifest.status)) return;
 		if (hasAsyncStartMarker(loaded.manifest)) return;
 		if (readEvents(loaded.manifest.eventsPath).some((event) => event.type === "async.started" || event.type === "async.completed" || event.type === "async.failed")) return;

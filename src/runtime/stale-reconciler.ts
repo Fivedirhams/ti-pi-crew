@@ -298,6 +298,13 @@ function repairStaleRun(
  * 1. Check if result already exists → use it
  * 2. Check PID liveness
  * 3. Dead PID → repair immediately; alive PID → only fail if stale > 24h
+ *
+ * NOTE: Callers must provide locking via withRunLock/withRunLockSync when
+ * calling from contexts where concurrent reconciliation of the same runId
+ * could occur (e.g., the auto-repair timer). The crash-recovery.ts caller
+ * already provides this. The reconcileOrphanedTempWorkspaces caller handles
+ * /tmp workspaces where concurrent access is a known benign race (separate
+ * dirs, low consequence of redundant repair).
  */
 export function reconcileStaleRun(
 	manifest: TeamRunManifest,
@@ -545,6 +552,14 @@ export function reconcileOrphanedTempWorkspaces(
 			// cleanup decision (fixes TOCTOU race where a manifest may have
 			// transitioned from 'running' to 'completed' between the main loop
 			// and this re-scan).
+			//
+			// KNOWN BENIGN RACE: Between the re-scan completing and the cleanup
+			// decision being acted upon, a new run could be created in that
+			// workspace (e.g., a concurrent process starts a new run while we
+			// are deciding whether to delete the dir). This is acceptable for
+			// /tmp cleanup because: (a) the consequence is at most leaving an
+			// extra dir that will be cleaned on the next tick, and (b) the
+			// 1-hour age threshold provides a safety margin.
 			let canCleanup = !hasRunning;
 			if (canCleanup) {
 				if (fs.existsSync(stateRunsDir)) {

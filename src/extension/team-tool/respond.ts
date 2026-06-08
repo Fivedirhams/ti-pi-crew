@@ -20,11 +20,11 @@ export function handleRespond(params: TeamToolParamsValue, ctx: TeamContext): Pi
 
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
 	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "respond", status: "error" }, true);
-	const loaded = loadRunManifestById(runCwd, params.runId);
+	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "respond", status: "error" }, true);
 
 	return withRunLockSync(loaded.manifest, () => {
-		const fresh = loadRunManifestById(loaded.manifest.cwd, params.runId!);
+		const fresh = loadRunManifestById(loaded.manifest.cwd, params.runId!); // NOTE: inside withRunLockSync - consistent read
 		if (!fresh) return result(`Run '${params.runId}' not found.`, { action: "respond", status: "error" }, true);
 		const foreignRun = typeof fresh.manifest.ownerSessionId === "string" && fresh.manifest.ownerSessionId !== ctx.sessionId;
 		if (foreignRun && !params.force) return result(`Run ${fresh.manifest.runId} belongs to another session. Use force: true to override.`, { action: "respond", status: "error", runId: fresh.manifest.runId }, true);

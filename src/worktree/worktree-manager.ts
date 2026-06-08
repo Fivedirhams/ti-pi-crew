@@ -259,7 +259,7 @@ export function overlaySeedPaths(repoRoot: string, worktreePath: string, seedPat
 		fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
 		fs.rmSync(destinationPath, { force: true, recursive: true });
 		fs.cpSync(sourcePath, destinationPath, {
-			dereference: true,
+			dereference: false,
 			force: true,
 			preserveTimestamps: true,
 			recursive: true,
@@ -296,6 +296,7 @@ export function prepareTaskWorkspace(manifest: TeamRunManifest, task: TeamTaskSt
 	}
 	pruneStaleWorktrees(repoRoot);
 	const exists = branchExists(repoRoot, branch);
+	let worktreeCreated = false;
 	try {
 		if (exists.local) {
 			git(repoRoot, ["worktree", "add", worktreePath, branch]);
@@ -305,7 +306,14 @@ export function prepareTaskWorkspace(manifest: TeamRunManifest, task: TeamTaskSt
 			}
 			git(repoRoot, ["worktree", "add", "-b", branch, worktreePath, "HEAD"]);
 		}
+		worktreeCreated = true;
 	} catch (error) {
+		// Clean up orphaned worktree directory if git worktree add failed
+		if (fs.existsSync(worktreePath)) {
+			try {
+				fs.rmSync(worktreePath, { recursive: true, force: true });
+			} catch { /* best-effort cleanup */ }
+		}
 		const msg = error instanceof Error ? error.message : String(error);
 		if (/already checked out|is already used by worktree/i.test(msg)) {
 			throw new Error(`Branch '${branch}' is checked out at another worktree. Run \`team cleanup runId=${manifest.runId} force=true\` or manually remove the conflicting worktree.`);

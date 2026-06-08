@@ -100,11 +100,10 @@ export function checkCrewDepth(inputMaxDepth?: number, env: NodeJS.ProcessEnv = 
  * the tracking Set without going through the public build flow.
  */
 export function createSafeTempDir(base: string, prefix: string): string {
-	if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true });
-	// FIX: Check FULL ancestor chain for symlinks before realpathSync.
+	// FIX: Walk FULL ancestor chain for symlinks BEFORE creating any directories.
 	// An attacker could plant a symlink at any ancestor of base (e.g.,
 	// making /home/bom/.pi -> /tmp/attacker). Walk from root to base
-	// and verify no component is a symlink.
+	// and verify no component is a symlink. Only THEN create base if needed.
 	const absoluteBase = path.resolve(base);
 	const parts = absoluteBase.split(path.sep);
 	let accumulated = "";
@@ -124,6 +123,8 @@ export function createSafeTempDir(base: string, prefix: string): string {
 	// Verify base dir itself is not a symlink
 	const baseStat = fs.lstatSync(base);
 	if (baseStat.isSymbolicLink()) throw new Error("Refusing to create temp dir in symlinked base: " + base);
+	// Create base dir only AFTER all ancestor symlink checks pass.
+	if (!fs.existsSync(base)) fs.mkdirSync(base, { recursive: true });
 	// Resolve base to canonical path before joining
 	const resolvedBase = fs.realpathSync(base);
 	// Verify resolved path has no symlink ancestors. realpathSync follows
@@ -372,6 +373,16 @@ export function cleanupOrphanTempDirs(
 			try {
 				const stat = fs.statSync(dir);
 				if (now - stat.mtimeMs > ORPHAN_TEMP_MAX_AGE_MS) {
+					// Re-check not a symlink immediately before rmSync to narrow TOCTOU window.
+					// An attacker could plant a symlink between the earlier lstatSync and now.
+					let preRmlstat: fs.Stats;
+					try {
+						preRmlstat = fs.lstatSync(dir);
+					} catch {
+						failed++;
+						continue;
+					}
+					if (preRmlstat.isSymbolicLink()) continue;
 					fs.rmSync(dir, { recursive: true, force: true });
 					createdTempDirs.delete(dir);
 					cleaned++;
@@ -443,6 +454,16 @@ export function cleanupLegacyOrphanTempDirs(
 			try {
 				const stat = fs.statSync(dir);
 				if (now - stat.mtimeMs > ORPHAN_TEMP_MAX_AGE_MS) {
+					// Re-check not a symlink immediately before rmSync to narrow TOCTOU window.
+					// An attacker could plant a symlink between the earlier lstatSync and now.
+					let preRmlstat: fs.Stats;
+					try {
+						preRmlstat = fs.lstatSync(dir);
+					} catch {
+						failed++;
+						continue;
+					}
+					if (preRmlstat.isSymbolicLink()) continue;
 					fs.rmSync(dir, { recursive: true, force: true });
 					cleaned++;
 				}

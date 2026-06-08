@@ -68,7 +68,7 @@ export async function waitForRun(
 	const deadline = Date.now() + timeoutMs;
 
 	// Fast path: already terminal on disk
-	const loaded = loadRunManifestById(cwd, runId);
+	const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 	if (loaded && isFinishedRunStatus(loaded.manifest.status)) {
 		return loaded;
 	}
@@ -114,7 +114,7 @@ export async function waitForRun(
 				);
 			}
 		}
-		const fresh = loadRunManifestById(cwd, runId);
+		const fresh = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 		if (fresh && isFinishedRunStatus(fresh.manifest.status)) {
 			return fresh;
 		}

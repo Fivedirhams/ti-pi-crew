@@ -853,7 +853,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 						error instanceof Error ? error.message : String(error);
 					if (runId) {
 						try {
-							const loaded = loadRunManifestById(ctx.cwd, runId);
+							const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 							if (
 								loaded &&
 								loaded.manifest.status !== "completed" &&
@@ -907,7 +907,7 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 						}
 					}
 					if (ownerCurrent && runId) {
-						const loaded = loadRunManifestById(ctx.cwd, runId);
+						const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 						const status = loaded?.manifest.status ?? "finished";
 						const level =
 							status === "failed" || status === "blocked"

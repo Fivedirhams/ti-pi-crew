@@ -47,7 +47,7 @@ function isTaskActive(task: TeamTaskState): boolean {
 }
 
 function markActiveTasksAndAgentsFailed(run: TeamRunManifest, message: string): void {
-	const loaded = loadRunManifestById(run.cwd, run.runId);
+	const loaded = loadRunManifestById(run.cwd, run.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 	const tasks = loaded?.tasks ?? [];
 	const failedAt = new Date().toISOString();
 	if (tasks.some(isTaskActive)) {
@@ -73,7 +73,7 @@ export function markDeadAsyncRunIfNeeded(run: TeamRunManifest, now = Date.now(),
 	const asyncPid = run.async.pid;
 	const message = `Background runner died unexpectedly; check background.log (${liveness.detail}).`;
 	return withRunLockSync(run, () => {
-		const fresh = loadRunManifestById(run.cwd, run.runId);
+		const fresh = loadRunManifestById(run.cwd, run.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 		if (!fresh || !isActiveRunStatus(fresh.manifest.status)) return undefined;
 		const failed = updateRunStatus(fresh.manifest, "failed", message);
 		markActiveTasksAndAgentsFailed(failed, message);

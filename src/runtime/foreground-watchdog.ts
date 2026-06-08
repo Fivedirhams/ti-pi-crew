@@ -77,7 +77,7 @@ export function startForegroundWatchdog(opts: WatchdogOptions): void {
 		}
 
 		try {
-			const loaded = loadRunManifestById(cwd, runId);
+			const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 			if (!loaded) {
 				// Run not found — stop watchdog
 				activeWatchdogs.delete(runId);

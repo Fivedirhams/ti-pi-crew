@@ -652,7 +652,7 @@ export function createRunSnapshotCache(cwd: string, options: RunSnapshotCacheOpt
 	function build(runId: string, previous?: CacheEntry): CacheEntry {
 		let loaded: ReturnType<typeof loadRunManifestById>;
 		try {
-			loaded = loadRunManifestById(cwd, runId);
+			loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		} catch {
 			if (previous) return previous;
 			throw new Error(`Run '${runId}' could not be parsed.`);

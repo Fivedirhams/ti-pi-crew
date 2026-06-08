@@ -23,7 +23,7 @@ async function getViewer(): Promise<typeof DurableTranscriptViewerType> {
 export async function selectAgentTask(ctx: ExtensionCommandContext, runId: string | undefined, taskId?: string): Promise<{ runId: string; taskId?: string } | undefined> {
 	if (!runId) return undefined;
 	if (taskId) return { runId, taskId };
-	const loaded = loadRunManifestById(ctx.cwd, runId);
+	const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return { runId };
 	const agents = readCrewAgents(loaded.manifest);
 	if (ctx.hasUI && agents.length > 1) {
@@ -39,7 +39,7 @@ export async function openTranscriptViewer(ctx: ExtensionCommandContext, initial
 	const runId = selected.runId;
 	const taskId = selected.taskId;
 	if (!runId || !ctx.hasUI) return false;
-	const loaded = loadRunManifestById(ctx.cwd, runId);
+	const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return false;
 	const uiConfig = loadConfig(ctx.cwd).config.ui;
 	const DurableTranscriptViewer = await getViewer();

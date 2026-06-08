@@ -110,13 +110,9 @@ function resolveInside(baseDir: string, relativePath: string): string {
 	if (!normalizedRelativePath || normalizedRelativePath.split("/").some((segment) => segment === "..") || path.isAbsolute(normalizedRelativePath)) {
 		throw new Error(`Invalid artifact path: ${relativePath}`);
 	}
-	const base = path.resolve(baseDir);
-	const resolved = path.resolve(base, normalizedRelativePath);
-	const relative = path.relative(base, resolved);
-	if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Invalid artifact path: ${relativePath}`);
-	// C1: Extra normalization guard for case-insensitive / symlinked filesystems
-	if (!resolved.startsWith(base + path.sep) && resolved !== base) throw new Error(`Invalid artifact path (traversal): ${relativePath}`);
-	return resolved;
+	// Use resolveRealContainedPath to resolve symlinks before checking containment,
+	// preventing TOCTOU attacks where intermediate directories are replaced with symlinks.
+	return resolveRealContainedPath(baseDir, normalizedRelativePath);
 }
 
 export function writeArtifact(artifactsRoot: string, options: ArtifactWriteOptions): ArtifactDescriptor {
@@ -128,7 +124,10 @@ export function writeArtifact(artifactsRoot: string, options: ArtifactWriteOptio
 	const content = redactSecretString(options.content);
 	atomicWriteFile(filePath, content);
 	// Compute hash on written bytes for integrity verification.
-	const contentHash = hashContent(content);
+	// Read back the actual file content to handle atomicWrite fallback path
+	// where the written content might differ from the input (e.g., concurrent writes).
+	const writtenContent = fs.readFileSync(filePath, "utf-8");
+	const contentHash = hashContent(writtenContent);
 	const stats = fs.statSync(filePath);
 	return {
 		kind: options.kind,

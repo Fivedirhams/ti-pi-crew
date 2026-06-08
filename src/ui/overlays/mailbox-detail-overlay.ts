@@ -32,7 +32,7 @@ export class MailboxDetailOverlay {
 	}
 
 	private refresh(): void {
-		const loaded = loadRunManifestById(this.cwd, this.runId);
+		const loaded = loadRunManifestById(this.cwd, this.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 		if (!loaded) return;
 		// Track task count changes to trigger re-render
 		const taskCount = loaded.tasks.length;

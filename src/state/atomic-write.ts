@@ -1,7 +1,12 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { logInternalError } from "../utils/internal-error.ts";
 import { sleepSync } from "../utils/sleep.ts";
+
+function hashContent(content: string): string {
+	return crypto.createHash("sha256").update(content, "utf-8").digest("hex");
+}
 
 const RETRYABLE_RENAME_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
 
@@ -12,6 +17,12 @@ const RETRYABLE_RENAME_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
  *
  * This walks the full ancestor chain to detect any symlinks in the path,
  * preventing attacks where an intermediate ancestor is a symlink.
+ *
+ * Platform note: The ownership verification (via process.getuid) is only
+ * available on Unix-like platforms (Linux, macOS). On Windows or other
+ * platforms where getuid is unavailable, the ownership check is skipped
+ * and only symlink detection is performed. This means symlink safety
+ * verification is weaker on non-Unix platforms.
  */
 export function isSymlinkSafePath(filePath: string): boolean {
 	try {
@@ -102,7 +113,7 @@ export async function renameWithRetryAsync(tempPath: string, filePath: string, r
 /** Test alias for renameWithRetryAsync. */
 export const __test__renameWithRetryAsync = renameWithRetryAsync;
 
-export function atomicWriteFile(filePath: string, content: string): void {
+export function atomicWriteFile(filePath: string, content: string, expectedHash?: string): void {
 	if (!isSymlinkSafePath(filePath)) throw new Error(`Refusing to write: target is a symlink or inside untrusted directory: ${filePath}`);
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	const tempPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -147,8 +158,20 @@ export function atomicWriteFile(filePath: string, content: string): void {
 			}
 			try {
 				fs.writeFileSync(filePath, content, "utf-8");
-			} catch {
+			} catch (writeError) {
+				// Issue 1 fix: clean up temp file before re-throwing, matching
+				// atomicWriteBuffer and atomicWriteFileAsync patterns.
+				try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
 				throw renameError;
+			}
+			// Issue 2 fix: verify hash after fallback write to detect content mismatch
+			// (e.g., when caller hashed redacted content but fallback wrote unredacted).
+			if (expectedHash !== undefined) {
+				const actualHash = hashContent(fs.readFileSync(filePath, "utf-8"));
+				if (actualHash !== expectedHash) {
+					try { fs.rmSync(filePath, { force: true }); } catch { /* best-effort */ }
+					throw new Error(`Hash mismatch after atomic write: expected ${expectedHash}, got ${actualHash}`);
+				}
 			}
 			try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
 		}

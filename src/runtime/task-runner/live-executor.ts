@@ -65,7 +65,7 @@ export async function runLiveTask(input: RunLiveTaskInput): Promise<RunLiveTaskO
 	const transcriptPath = `${manifest.artifactsRoot}/transcripts/${task.id}.jsonl`;
 	const isCurrent = input.isCurrent ?? (() => {
 		if (input.signal?.aborted) return false;
-		const loaded = loadRunManifestById(manifest.cwd, manifest.runId);
+		const loaded = loadRunManifestById(manifest.cwd, manifest.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 		const currentTask = loaded?.tasks.find((item) => item.id === task.id);
 		if (loaded?.manifest.status && loaded.manifest.status !== "running") return false;
 		return currentTask ? currentTask.status === "running" : true;

@@ -42,7 +42,7 @@ export function collectRunMetrics(
 	runId: string,
 ): RunMetrics | undefined {
 	assertSafePathId("runId", runId);
-	const result = loadRunManifestById(cwd, runId);
+	const result = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 	if (!result) return undefined;
 
 	const { manifest, tasks } = result;

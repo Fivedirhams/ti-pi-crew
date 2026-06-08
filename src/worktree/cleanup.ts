@@ -21,6 +21,11 @@ function sanitizeBranchPart(value: string): string {
 	return value.toLowerCase().replace(/[^a-z0-9._/-]+/g, "-").replace(/^-+|-+$/g, "") || "task";
 }
 
+function sanitizeFilename(value: string): string {
+	// Strip control chars and newlines for safe artifact filenames
+	return value.slice(0, 200).replace(/[\x00-\x1f\x7f-\x9f\r\n]+/g, " ");
+}
+
 function git(cwd: string, args: string[]): string {
 	return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], env: GIT_SAFE_ENV, windowsHide: true }).trim();
 }
@@ -74,12 +79,20 @@ export function cleanupRunWorktrees(manifest: TeamRunManifest, options: { force?
 				}
 				execFileSync("git", ["commit", "-m", `pi-crew: ${safeDesc}`], { cwd: worktreePath, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], env: GIT_SAFE_ENV, windowsHide: true });
 				// Create branch in the main repo pointing to this worktree's HEAD
+				let branchError: Error | null = null;
 				try {
 					execFileSync("git", ["branch", branchName], { cwd: worktreePath, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], env: GIT_SAFE_ENV, windowsHide: true });
-				} catch {
+				} catch (err) {
+					branchError = err instanceof Error ? err : new Error(String(err));
 					// Branch already exists — use timestamp suffix
 					const tsBranch = `${branchName}-${Date.now()}`;
-					execFileSync("git", ["branch", tsBranch], { cwd: worktreePath, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], env: GIT_SAFE_ENV, windowsHide: true });
+					try {
+						execFileSync("git", ["branch", tsBranch], { cwd: worktreePath, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], env: GIT_SAFE_ENV, windowsHide: true });
+					} catch (err2) {
+						// Both branch attempts failed — accumulate error for outer catch
+						const err2_msg = err2 instanceof Error ? err2.message : String(err2);
+						throw new Error(`branch creation failed: ${branchError.message}; fallback branch also failed: ${err2_msg}`);
+					}
 				}
 				result.committedBranches.push(branchName);
 				// Remove the worktree (branch persists)
@@ -88,7 +101,7 @@ export function cleanupRunWorktrees(manifest: TeamRunManifest, options: { force?
 				result.removed.push(worktreePath);
 				// FIX: entry is a DirEnt object, must use entry.name for the path.
 				// Also apply same newline stripping as safeDesc for consistency.
-				const safeBranchName = entry.name.slice(0, 200).replace(/[\r\n]+/g, " ");
+				const safeBranchName = sanitizeFilename(entry.name);
 				const artifact = writeArtifact(manifest.artifactsRoot, {
 					kind: "metadata",
 					relativePath: `metadata/worktree-branch-${safeBranchName}.json`,
@@ -99,7 +112,7 @@ export function cleanupRunWorktrees(manifest: TeamRunManifest, options: { force?
 			} catch (error) {
 				// Fallback to preserving dirty worktree
 				// FIX: entry is a DirEnt object, must use entry.name
-				const safeFallbackName = entry.name.slice(0, 200).replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
+				const safeFallbackName = sanitizeFilename(entry.name);
 				const artifact = writeArtifact(manifest.artifactsRoot, {
 					kind: "diff",
 					relativePath: `cleanup/${safeFallbackName}.diff`,

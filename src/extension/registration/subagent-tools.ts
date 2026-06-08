@@ -204,7 +204,7 @@ function startAgentToolProgress(cwd: string, agentRecordId: string, onUpdate: On
 			let tasks;
 			let agents;
 			if (record.runId) {
-				const loaded = loadRunManifestById(cwd, record.runId);
+				const loaded = loadRunManifestById(cwd, record.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 				if (loaded) {
 					manifest = loaded.manifest;
 					tasks = loaded.tasks;

@@ -92,7 +92,7 @@ export async function handleApi(params: TeamToolParamsValue, ctx: TeamContext): 
 	if (!params.runId) return result("API requires runId.", { action: "api", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
 	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "api", status: "error" }, true);
-	const loaded = loadRunManifestById(runCwd, params.runId);
+	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "api", status: "error" }, true);
 	if (operation === "read-manifest") {
 		return result(JSON.stringify(loaded.manifest, null, 2), { action: "api", status: "ok", runId: loaded.manifest.runId, artifactsRoot: loaded.manifest.artifactsRoot });
@@ -102,7 +102,7 @@ export async function handleApi(params: TeamToolParamsValue, ctx: TeamContext): 
 		if (!permission.allowed) return result(permission.reason ?? "Plan approval is not allowed in this context.", { action: "api", status: "error", runId: loaded.manifest.runId }, true);
 		try {
 			return withRunLockSync(loaded.manifest, () => {
-				const current = loadRunManifestById(ctx.cwd, loaded.manifest.runId) ?? loaded;
+				const current = loadRunManifestById(ctx.cwd, loaded.manifest.runId) ?? loaded; // NOTE: inside withRunLockSync - consistent read
 				const approval = current.manifest.planApproval;
 				if (!approval?.required || approval.status !== "pending") return result("Run has no pending plan approval request.", { action: "api", status: "error", runId: loaded.manifest.runId }, true);
 				const now = new Date().toISOString();
@@ -121,7 +121,7 @@ export async function handleApi(params: TeamToolParamsValue, ctx: TeamContext): 
 		if (!permission.allowed) return result(permission.reason ?? "Plan approval cancellation is not allowed in this context.", { action: "api", status: "error", runId: loaded.manifest.runId }, true);
 		try {
 			return withRunLockSync(loaded.manifest, () => {
-				const current = loadRunManifestById(ctx.cwd, loaded.manifest.runId) ?? loaded;
+				const current = loadRunManifestById(ctx.cwd, loaded.manifest.runId) ?? loaded; // NOTE: inside withRunLockSync - consistent read
 				const approval = current.manifest.planApproval;
 				if (!approval?.required || approval.status !== "pending") return result("Run has no pending plan approval request.", { action: "api", status: "error", runId: loaded.manifest.runId }, true);
 				const now = new Date().toISOString();

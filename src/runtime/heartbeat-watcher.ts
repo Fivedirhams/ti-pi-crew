@@ -88,7 +88,7 @@ export class HeartbeatWatcher {
 			// Bug #5 fix: if stateRoot doesn't exist, the run was pruned — skip it silently.
 			// This prevents stale "heartbeat dead" notifications for runs that no longer exist.
 			if (!fs.existsSync(run.stateRoot)) continue;
-			const loaded = loadRunManifestById(this.opts.cwd, run.runId);
+			const loaded = loadRunManifestById(this.opts.cwd, run.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 			if (!loaded) continue;
 			for (const task of loaded.tasks) {
 				if (task.status !== "running") continue;

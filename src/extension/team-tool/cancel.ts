@@ -41,7 +41,7 @@ export function abortOwned(
 ): AbortOwnedResult {
 	const runCwd = locateRunCwd(runId, ctx.cwd);
 	if (!runCwd) return { abortedIds: [], missingIds: taskIds ?? [], foreignIds: [] };
-	const loaded = loadRunManifestById(runCwd, runId);
+	const loaded = loadRunManifestById(runCwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return { abortedIds: [], missingIds: taskIds ?? [], foreignIds: [] };
 
 	const result: AbortOwnedResult = { abortedIds: [], missingIds: [], foreignIds: [] };
@@ -81,7 +81,7 @@ export async function handleRetry(params: TeamToolParamsValue, ctx: TeamContext,
 	if (!params.runId) return result("Retry requires runId.", { action: "retry", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
 	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "retry", status: "error" }, true);
-	const loaded = loadRunManifestById(runCwd, params.runId);
+	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "retry", status: "error" }, true);
 
 	// Pre-lock ownership check: reject foreign-owned runs unless force is set
@@ -146,7 +146,7 @@ export async function handleCancel(params: TeamToolParamsValue, ctx: TeamContext
 	if (!params.runId) return result("Cancel requires runId.", { action: "cancel", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
 	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "cancel", status: "error" }, true);
-	const loaded = loadRunManifestById(runCwd, params.runId);
+	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "cancel", status: "error" }, true);
 
 	// Pre-lock ownership check: reject foreign-owned runs unless force is set

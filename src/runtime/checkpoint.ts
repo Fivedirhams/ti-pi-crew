@@ -124,13 +124,22 @@ export class FileCheckpointStore implements CheckpointStore {
 	}
 }
 
+const MAX_STORES = 100;
 const _stores = new Map<string, FileCheckpointStore>();
 
 /**
  * Get checkpoint store for a run's state root.
+ * Uses LRU eviction when the store exceeds MAX_STORES entries.
  */
 export function getCheckpointStore(stateRoot: string): CheckpointStore {
 	if (!_stores.has(stateRoot)) {
+		if (_stores.size >= MAX_STORES) {
+			// Evict the oldest entry (first in insertion order)
+			const oldestKey = _stores.keys().next().value;
+			if (oldestKey !== undefined) {
+				_stores.delete(oldestKey);
+			}
+		}
 		_stores.set(stateRoot, new FileCheckpointStore(stateRoot));
 	}
 	return _stores.get(stateRoot)!;

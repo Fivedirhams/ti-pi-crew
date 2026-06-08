@@ -25,15 +25,16 @@ function atomicWriteBuffer(filePath: string, content: Buffer): void {
 	try {
 		const openedStat = fs.fstatSync(fd);
 		if (!openedStat.isFile()) {
-			fs.closeSync(fd);
 			throw new Error(`Refusing to write: opened path is not a regular file: ${tempPath}`);
 		}
 		fs.writeSync(fd, content, 0, content.length);
-		fs.closeSync(fd);
 		renameWithRetry(tempPath, filePath);
 	} catch (error) {
 		try { fs.rmSync(tempPath, { force: true }); } catch { /* best-effort */ }
 		throw error;
+	} finally {
+		// Always close fd; closeSync is safe to call even if fd was already closed
+		try { fs.closeSync(fd); } catch { /* best-effort */ }
 	}
 }
 
@@ -113,11 +114,22 @@ export function writeBlob(artifactsRoot: string, input: {
 	// concurrent writes to the same hash are safe. Metadata (mime, retention, etc.)
 	// is written atomically via atomicWriteFile to prevent race conditions between
 	// concurrent writers that might have different metadata values.
-	atomicWriteBuffer(blobPath, Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
-	// Use atomicWriteFile for metadata - prevents partial metadata on crash.
-	// Both content and metadata writes are now atomic, ensuring that either both
-	// succeed or neither persists, preventing orphan blobs without metadata.
-	atomicWriteFile(metadataPath, JSON.stringify(metadata, null, 2));
+	// Issue 2 fix: wrap both writes in a transaction so orphaned blobs are cleaned up.
+	let blobWritten = false;
+	try {
+		atomicWriteBuffer(blobPath, Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8"));
+		blobWritten = true;
+		// Use atomicWriteFile for metadata - prevents partial metadata on crash.
+		// Both content and metadata writes are now atomic, ensuring that either both
+		// succeed or neither persists, preventing orphan blobs without metadata.
+		atomicWriteFile(metadataPath, JSON.stringify(metadata, null, 2));
+	} catch (error) {
+		// If metadata write failed after blob succeeded, clean up the orphan blob
+		if (blobWritten) {
+			try { fs.rmSync(blobPath, { force: true }); } catch { /* best-effort */ }
+		}
+		throw error;
+	}
 
 	return { hash, algorithm, blobPath: resolveRealContainedPath(artifactsRoot, blobPath), metadataPath: resolveRealContainedPath(artifactsRoot, metadataPath), sizeBytes: metadata.sizeBytes };
 }

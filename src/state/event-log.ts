@@ -430,22 +430,24 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 		// on crash. The async path already does this (line 256).
 		persistSequence(eventsPath, seq);
 		fs.appendFileSync(eventsPath, `${JSON.stringify(redactSecrets(fullEvent))}\n`, "utf-8");
+		// FIX: Update cache AFTER successful append (inside the if block) so that
+		// on crash between append and cache update, the cache is already correct.
+		// If crash happens before this point, cache was not updated so stays correct.
+		try {
+			const stat = fs.statSync(eventsPath);
+			if (sequenceCache.size >= MAX_SEQUENCE_CACHE_ENTRIES) {
+				evictOldestSequenceCacheEntries();
+			}
+			sequenceCache.set(eventsPath, { size: stat.size, mtimeMs: stat.mtimeMs, seq });
+		} catch (error) {
+			logInternalError("event-log.persist-sequence", error, `eventsPath=${eventsPath}`);
+		}
 	}
 	appendCounter++;
 	if (appendCounter % 100 === 0 && needsRotation(eventsPath)) {
 		try { compactEventLog(eventsPath); } catch (error) { logInternalError("event-log.rotation", error, `eventsPath=${eventsPath}`); }
 	}
 	try { emitFromTeamEvent(fullEvent); } catch (error) { logInternalError("event-log.emit", error); }
-	try {
-		const stat = fs.statSync(eventsPath);
-		if (sequenceCache.size >= MAX_SEQUENCE_CACHE_ENTRIES) {
-			evictOldestSequenceCacheEntries();
-		}
-		sequenceCache.set(eventsPath, { size: stat.size, mtimeMs: stat.mtimeMs, seq });
-		// Note: persistSequence already called before append above
-	} catch (error) {
-		logInternalError("event-log.persist-sequence", error, `eventsPath=${eventsPath}`);
-	}
 	return fullEvent;
 }
 

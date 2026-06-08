@@ -18,7 +18,7 @@ export function handleStatus(params: TeamToolParamsValue, ctx: TeamContext): PiT
 	if (!params.runId) return result("Status requires runId.", { action: "status", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
 	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "status", status: "error" }, true);
-	const loaded = loadRunManifestById(runCwd, params.runId);
+	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "status", status: "error" }, true);
 	let { manifest, tasks } = loaded;
 	let asyncLivenessLine: string | undefined;

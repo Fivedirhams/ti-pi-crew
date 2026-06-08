@@ -8,7 +8,7 @@ export function updateTask(tasks: TeamTaskState[], updated: TeamTaskState): Team
 }
 
 export function persistSingleTaskUpdate(manifest: TeamRunManifest, fallbackTasks: TeamTaskState[], updated: TeamTaskState): TeamTaskState[] {
-	const latest = loadRunManifestById(manifest.cwd, manifest.runId)?.tasks ?? fallbackTasks;
+	const latest = loadRunManifestById(manifest.cwd, manifest.runId)?.tasks ?? fallbackTasks; // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	const merged = updateTask(latest, updated);
 	try {
 		saveRunTasks(manifest, merged);

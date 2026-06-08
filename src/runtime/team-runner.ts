@@ -128,12 +128,18 @@ function shouldMergeTaskUpdate(current: TeamTaskState, updated: TeamTaskState): 
 	if (current.finishedAt && updated.finishedAt) {
 		const currentFinished = new Date(current.finishedAt).getTime();
 		const updatedFinished = new Date(updated.finishedAt).getTime();
-		// FIX: Handle NaN currentFinished (malformed date). Treat NaN as infinity
-		// (never older than valid updated) to prevent regression from unknown state.
+		// FIX: Handle NaN currentFinished (malformed date). Log warning and treat as
+		// invalid state that should be replaced rather than persisting corruption.
+		if (Number.isNaN(currentFinished)) {
+			console.warn(`[team-runner] Task ${current.id} has malformed finishedAt, treating as invalid state: ${current.finishedAt}`);
+		}
 		const currentTime = Number.isNaN(currentFinished) ? Infinity : currentFinished;
 		const updatedTime = Number.isNaN(updatedFinished) ? Infinity : updatedFinished;
 		if (updatedTime < currentTime) return false;
 	}
+	// FIX: An update with no completion time should not overwrite one that has a
+	// completion time. NaN comparisons always return false, so guard explicitly.
+	if (!updated.finishedAt) return false;
 	return updated.status !== current.status || updated.finishedAt !== current.finishedAt || updated.startedAt !== current.startedAt || Boolean(updated.resultArtifact) || Boolean(updated.error) || Boolean(updated.modelAttempts?.length) || Boolean(updated.usage) || Boolean(updated.attempts?.length);
 }
 
@@ -192,7 +198,7 @@ function writeProgress(manifest: TeamRunManifest, tasks: TeamTaskState[], produc
 			"",
 		].join("\n"),
 	});
-	return { ...manifest, updatedAt: new Date().toISOString(), artifacts: [...manifest.artifacts.filter((artifact) => !(artifact.kind === "progress" && artifact.path === progress.path)), progress] };
+	return { ...manifest, updatedAt: new Date().toISOString(), artifacts: [...manifest.artifacts.filter((artifact) => !(artifact.kind === "progress" && artifact.path === progress.path)), progress].filter((artifact, index, self) => self.findIndex((a) => a.path === artifact.path) === index) };
 }
 
 function applyPolicy(manifest: TeamRunManifest, tasks: TeamTaskState[], limits?: CrewLimitsConfig): TeamRunManifest {
@@ -338,7 +344,8 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 	} catch (error) {
 		// P1: Catch unhandled errors — ensure manifest/tasks/agents are terminal so they don't stay "running" forever.
 		const message = error instanceof Error ? error.message : String(error);
-		const loaded = loadRunManifestById(input.manifest.cwd, input.manifest.runId);
+		// NOTE: no withRunLock — best-effort only; concurrent writes may cause inconsistency
+		const loaded = loadRunManifestById(input.manifest.cwd, input.manifest.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		const freshManifest = loaded?.manifest ?? manifest;
 		const freshTasks = refreshTaskGraphQueues(loaded?.tasks ?? input.tasks);
 		const failedAt = new Date().toISOString();
@@ -546,6 +553,7 @@ async function executeTeamRunCore(
 						const startedAt = new Date().toISOString();
 						const inFlightAttempts: TaskAttemptState[] = [...attemptsSoFar, { attemptId: info.attemptId, startedAt }];
 						input.metricRegistry?.counter("crew.task.retry_attempt_total", "Retry attempts by run and task").inc({ runId: manifest.runId, taskId: task.id });
+						// NOTE: no withRunLock — best-effort only; concurrent writes may cause inconsistency
 						const fresh = loadRunManifestById(manifest.cwd, manifest.runId);
 						const freshManifest = fresh?.manifest ?? manifest;
 						const freshTasks = fresh?.tasks ?? tasks;
@@ -583,6 +591,7 @@ async function executeTeamRunCore(
 				} catch (retryError) {
 					if (retryError instanceof CrewCancellationError || input.signal?.aborted) {
 						const reason = retryError instanceof CrewCancellationError ? retryError.reason : cancellationReasonFromSignal(input.signal);
+						// NOTE: no withRunLock — best-effort only; concurrent writes may cause inconsistency
 						const fresh = loadRunManifestById(manifest.cwd, manifest.runId);
 						const freshManifest = fresh?.manifest ?? manifest;
 						const freshTasks = fresh?.tasks ?? tasks;
@@ -591,6 +600,7 @@ async function executeTeamRunCore(
 						return { manifest: updateRunStatus(freshManifest, "cancelled", reason.message), tasks: cancelledTasks };
 					}
 					if (lastFailed) return lastFailed;
+					// NOTE: no withRunLock — best-effort only; concurrent writes may cause inconsistency
 					const fresh = loadRunManifestById(manifest.cwd, manifest.runId);
 					const freshManifest = fresh?.manifest ?? manifest;
 					const freshTasks = fresh?.tasks ?? tasks;
@@ -601,15 +611,19 @@ async function executeTeamRunCore(
 			},
 		);
 		if (results.length === 0) break;
-		manifest = { ...results.at(-1)!.manifest, artifacts: mergeArtifacts([manifest.artifacts, ...results.map((item) => item.manifest.artifacts)].flat()) };
-		tasks = mergeTaskUpdatesPreservingTerminal(tasks, results);
+		// FIX: Filter out undefined entries from partial results when error occurred
+		// during parallel execution. Other workers may have written partial results
+		// before one threw. Results may be partial - some tasks in-flight at error
+		// time will not have entries in the results array.
+		const validResults = results.filter((item): item is NonNullable<typeof item> => item !== undefined);
+		manifest = { ...validResults.at(-1)!.manifest, artifacts: mergeArtifacts([manifest.artifacts, ...validResults.map((item) => item.manifest.artifacts)].flat()) };
+		tasks = mergeTaskUpdatesPreservingTerminal(tasks, validResults);
 		// Build a synthetic manifest that reflects the merged task state.
 		// The last result's manifest contains stale task state from that worker's
 		// snapshot; merged tasks are correct but manifest.tasks would be stale.
-		// Use type assertion because TeamRunManifest type omits tasks but the
-		// runtime object may have it (gets serialized to manifest.json).
-		(manifest as { tasks?: TeamTaskState[] }).tasks = tasks;
-		manifest = { ...manifest, updatedAt: new Date().toISOString() };
+		// Use a separate variable with explicit tasks field rather than type assertion.
+		const manifestWithTasks: TeamRunManifest & { tasks: TeamTaskState[] } = { ...manifest, tasks };
+		manifest = { ...manifestWithTasks, updatedAt: new Date().toISOString() };
 
 		// Advance workflow phases whose tasks are all in terminal state
 		const terminalStatuses = new Set(["completed", "failed", "skipped", "cancelled", "needs_attention"]);

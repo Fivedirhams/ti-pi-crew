@@ -463,7 +463,7 @@ export async function handleResume(
 			{ action: "resume", status: "error" },
 			true,
 		);
-	const loaded = loadRunManifestById(runCwd, params.runId);
+	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded)
 		return result(
 			`Run '${params.runId}' not found.`,
@@ -686,7 +686,7 @@ export function handleSteer(
 			{ action: "steer", status: "error" },
 			true,
 		);
-	const loaded = loadRunManifestById(runCwd, runId);
+	const loaded = loadRunManifestById(runCwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded)
 		return result(
 			`Run '${runId}' not found`,
@@ -791,7 +791,7 @@ export function locateRunCwd(
 	baseCwd: string,
 ): string | undefined {
 	// Fast path: run is in the current CWD
-	if (loadRunManifestById(baseCwd, runId)) return baseCwd;
+	if (loadRunManifestById(baseCwd, runId)) // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency return baseCwd;
 
 	// Scan immediate child directories, but with defensive bounds.
 	try {
@@ -811,7 +811,7 @@ export function locateRunCwd(
 				) continue;
 			}
 			const candidate = path.join(baseCwd, entry.name);
-			if (loadRunManifestById(candidate, runId)) return candidate;
+			if (loadRunManifestById(candidate, runId)) return candidate; // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		}
 	} catch {
 		/* ignore unreadable dirs */

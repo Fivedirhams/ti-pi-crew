@@ -39,7 +39,7 @@ export async function executeHook(name: HookName, ctx: HookContext): Promise<Hoo
 	function sanitizeMergeData(data: Record<string, unknown>): Record<string, unknown> {
 		const clean: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(data)) {
-			if (!POLLUTED_KEYS.has(k)) clean[k] = v;
+			if (!POLLUTED_KEYS.has(k.toLowerCase())) clean[k] = v;
 		}
 		return clean;
 	}

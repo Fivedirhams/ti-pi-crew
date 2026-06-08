@@ -9,7 +9,7 @@ import { DEFAULT_CACHE, DEFAULT_PATHS } from "../config/defaults.ts";
 import { createRunId, createTaskId } from "../utils/ids.ts";
 import { findRepoRoot, projectCrewRoot, userCrewRoot } from "../utils/paths.ts";
 import { assertSafePathId, resolveContainedRelativePath, resolveRealContainedPath } from "../utils/safe-paths.ts";
-import { withRunLock } from "./locks.ts";
+import { withRunLock, withRunLockSync } from "./locks.ts";
 import { logInternalError } from "../utils/internal-error.ts";
 import type { TeamConfig } from "../teams/team-config.ts";
 import type { WorkflowConfig } from "../workflows/workflow-config.ts";
@@ -34,7 +34,7 @@ interface ManifestCacheEntry {
 	cachedAt?: number;
 }
 
-const MANIFEST_CACHE_TTL_MS = 30 * 1000; // 30 seconds (FIX: reduced from 5 minutes for faster state updates)
+const MANIFEST_CACHE_TTL_MS = 5 * 1000; // 5 seconds (FIX: reduced from 30s for faster state updates)
 const manifestCache = new Map<string, ManifestCacheEntry>();
 
 function setManifestCache(stateRoot: string, entry: ManifestCacheEntry): void {
@@ -185,8 +185,13 @@ export function createRunManifest(params: {
 	};
 	fs.mkdirSync(paths.stateRoot, { recursive: true });
 	fs.mkdirSync(paths.artifactsRoot, { recursive: true });
-	atomicWriteJson(paths.manifestPath, manifest);
-	atomicWriteJson(paths.tasksPath, tasks);
+	// FIX: Use saveManifestAndTasksAtomicSync and check result to detect
+	// partial failure. If tasksWritten=false when manifestWritten=true,
+	// throw to ensure manifest and tasks are always consistent.
+	const result = saveManifestAndTasksAtomicSync(manifest, tasks);
+	if (!result.manifestWritten || !result.tasksWritten) {
+		throw new Error(`Failed to write run state: manifestWritten=${result.manifestWritten} tasksWritten=${result.tasksWritten} error=${result.error ?? "unknown"}`);
+	}
 	appendEvent(paths.eventsPath, {
 		type: "run.created",
 		runId: paths.runId,
@@ -275,6 +280,29 @@ async function saveManifestAndTasksAtomic(manifest: TeamRunManifest, tasks: Team
 			await atomicWriteJsonAsync(path.join(manifest.stateRoot, "manifest.json"), manifest);
 			manifestWritten = true;
 			await atomicWriteJsonAsync(manifest.tasksPath, tasks);
+			tasksWritten = true;
+		});
+	} catch (err) {
+		return {
+			manifestWritten,
+			tasksWritten,
+			error: err instanceof Error ? err.message : String(err),
+		};
+	}
+	return { manifestWritten: true, tasksWritten: true };
+}
+
+/** @internal */
+function saveManifestAndTasksAtomicSync(manifest: TeamRunManifest, tasks: TeamTaskState[]): SaveManifestAndTasksResult {
+	let manifestWritten = false;
+	let tasksWritten = false;
+	try {
+		withRunLockSync(manifest, () => {
+			// FIX: Invalidate cache BEFORE writes to prevent stale cache serving.
+			invalidateRunCache(manifest.stateRoot);
+			atomicWriteJson(path.join(manifest.stateRoot, "manifest.json"), manifest);
+			manifestWritten = true;
+			atomicWriteJson(manifest.tasksPath, tasks);
 			tasksWritten = true;
 		});
 	} catch (err) {
@@ -404,6 +432,12 @@ export function loadRunManifestById(cwd: string, runId: string): { manifest: Tea
 		manifestStat = freshStat;
 		tasksStat = freshTasksStat;
 	}
+	// FIX: After 3 attempts with no convergence, perform a final consistency check.
+	// If manifest mtime > tasks mtime, the manifest is newer and likely inconsistent.
+	// Throw an error to allow caller to retry with lock for strict consistency.
+	if (manifest && tasksStat && manifestStat.mtimeMs > (tasksStat.mtimeMs ?? 0)) {
+		throw new Error(`Inconsistent run state detected: manifest (${manifestStat.mtimeMs}) is newer than tasks (${tasksStat.mtimeMs}). Retry with lock for strict consistency.`);
+	}
 	if (!manifest || !validateRunManifestPaths(cwd, runId, manifest, stateRoot, tasksPath)) return undefined;
 	setManifestCache(stateRoot, {
 		manifest,
@@ -466,6 +500,12 @@ export async function loadRunManifestByIdAsync(cwd: string, runId: string): Prom
 		attempts += 1;
 		manifestStat = freshStat;
 		tasksStat = freshTasksStat;
+	}
+	// FIX: After 3 attempts with no convergence, perform a final consistency check.
+	// If manifest mtime > tasks mtime, the manifest is newer and likely inconsistent.
+	// Throw an error to allow caller to retry with lock for strict consistency.
+	if (manifest && tasksStat && manifestStat.mtimeMs > (tasksStat.mtimeMs ?? 0)) {
+		throw new Error(`Inconsistent run state detected: manifest (${manifestStat.mtimeMs}) is newer than tasks (${tasksStat.mtimeMs}). Retry with lock for strict consistency.`);
 	}
 
 	if (!manifest || !validateRunManifestPaths(cwd, runId, manifest, stateRoot, tasksPath)) return undefined;

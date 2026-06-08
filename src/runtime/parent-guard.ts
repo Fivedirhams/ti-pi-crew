@@ -19,14 +19,14 @@
 
 /**
  * Poll interval for parent liveness checks (in milliseconds).
- * Default: 3000ms (3 seconds). A parent killed by SIGKILL is only detected
- * at the next poll tick.
+ * Default: 500ms. A parent killed by SIGKILL is detected within one poll
+ * interval (max 500ms latency).
  *
- * WARNING: Values below 1000ms significantly increase overhead for large
+ * WARNING: Values below 100ms significantly increase overhead for large
  * numbers of parallel workers, since each poll issues a process.kill(pid, 0)
  * syscall per worker. Only tune this if immediate detection is critical.
  */
-const POLL_INTERVAL_MS = Number(process.env.PI_CREW_PARENT_GUARD_INTERVAL_MS) || 3_000;
+const POLL_INTERVAL_MS = Number(process.env.PI_CREW_PARENT_GUARD_INTERVAL_MS) || 500;
 
 let guardInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -63,16 +63,16 @@ function selfTerminate(parentPid: number): never {
 export function startParentGuard(parentPid: number): void {
 	if (!parentPid || !Number.isFinite(parentPid) || parentPid <= 0) return;
 
-	// Immediate check — if parent is already dead, don't even start
-	if (!isPidAlive(parentPid)) {
-		selfTerminate(parentPid);
-	}
+	let firstTick = true;
 
 	guardInterval = setInterval(() => {
+		// Immediate check on first tick — eliminates race between guard start
+		// and parent death that would otherwise go undetected until next poll.
 		if (!isPidAlive(parentPid)) {
 			if (guardInterval) clearInterval(guardInterval);
 			selfTerminate(parentPid);
 		}
+		firstTick = false;
 	}, POLL_INTERVAL_MS);
 
 	// NOTE: Intentionally NOT calling guardInterval.unref() here.

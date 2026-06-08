@@ -33,6 +33,7 @@ async function executeTeamRun(
 import { logInternalError } from "../utils/internal-error.ts";
 import { writeAsyncStartMarker } from "./async-marker.ts";
 import { terminateActiveChildPiProcesses } from "./child-pi.ts";
+import { unregisterWorker } from "./orphan-worker-registry.ts";
 import { directTeamAndWorkflowFromRun } from "./direct-run.ts";
 import { expandParallelResearchWorkflow } from "./parallel-research.ts";
 import { startParentGuard, stopParentGuard } from "./parent-guard.ts";
@@ -155,6 +156,7 @@ function setupUnhandledRejectionGuard(
 		eventsPath?: string;
 	},
 	abortController: AbortController,
+	setExitFlag: () => void,
 ): void {
 	process.on("unhandledRejection", (reason, promise) => {
 		const message =
@@ -184,13 +186,64 @@ function setupUnhandledRejectionGuard(
 				appendErr,
 			);
 		}
-		// FIX Issue #1: Call abortController.abort() to signal child processes to
-		// terminate, then exit immediately. Previously this only set exitCode=1
-		// without exiting, allowing execution to continue and write async.completed
-		// as SUCCESS while the process would later exit with code 1 (conflict).
+		// FIX Issues #2& #4: Signal child processes to terminate via abortController,
+		// set the exit flag so main() exits after the finally block runs cleanup.
+		// Previously this called process.exit(1) directly, bypassing the finally block
+		// and leaving child processes orphaned.
 		abortController.abort();
-		process.exit(1);
+		setExitFlag();
 	});
+}
+
+/**
+ * FIX Issue #4: Shared cleanup function called by both the finally block
+ * and error handlers. This ensures consistent cleanup regardless of how
+ * the process exits (normal flow, unhandled rejection, or main() exception).
+ */
+function runCleanup(
+	stopInterruptGuard: () => void,
+	stopParentGuard: () => void,
+	stopHeartbeat: () => void,
+	keepAlive: NodeJS.Timeout,
+	exitDueToRejection: boolean,
+): void {
+	console.log(
+		`[background-runner] DEBUG: runCleanup, exitDueToRejection=${exitDueToRejection}`,
+	);
+	stopInterruptGuard();
+	stopParentGuard();
+	stopHeartbeat();
+	// FIX: clearInterval FIRST, then kill children. This ensures the heartbeat
+	// interval is always cleaned up even if terminateActiveChildPiProcesses throws.
+	clearInterval(keepAlive);
+	// FIX Issues #1, #2, #4: Wrap child process termination in try/catch so errors
+	// don't prevent the cleanup from completing. We log but don't re-throw since
+	// we're already exiting.
+	let killed = 0;
+	try {
+		killed = terminateActiveChildPiProcesses();
+	} catch (error) {
+		console.log(
+			`[background-runner] runCleanup: terminateActiveChildPiProcesses error: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	console.log(`[background-runner] runCleanup: killed ${killed} child processes`);
+	// FIX Issue #5: Unregister this worker from the orphan registry on exit.
+	// Previously this was only cleaned up on the next session_start cleanup cycle,
+	// causing unnecessary delay in removing stale registrations.
+	try {
+		unregisterWorker(process.pid);
+	} catch (error) {
+		console.log(
+			`[background-runner] runCleanup: unregisterWorker error: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	// FIX Issues #2 & #4: If an unhandled rejection occurred, exit with code 1
+	// after cleanup completes. This ensures the finally block runs cleanup first,
+	// then we exit with the appropriate code.
+	if (exitDueToRejection) {
+		process.exit(1);
+	}
 }
 
 async function main(): Promise<void> {
@@ -242,7 +295,7 @@ async function main(): Promise<void> {
 		const cwd = argValue("--cwd");
 		const runId = argValue("--run-id");
 		if (cwd && runId) {
-			const loaded = loadRunManifestById(cwd, runId);
+			const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 			if (loaded)
 				appendEvent(loaded.manifest.eventsPath, {
 					type: "async.failed",
@@ -278,14 +331,17 @@ async function main(): Promise<void> {
 		});
 	}
 	process.on("SIGTERM", () => {
-		// BUG #17 FIX: Ignore SIGTERM.
+		// BUG #17 FIX: Ignore SIGTERM to prevent io_uring corruption.
 		// IMPORTANT: Perform real I/O here to flush io_uring state after EINTR.
 		// Without I/O, io_uring can enter corrupted state and cause silent crash.
+		// FIX Issue #3: Trigger graceful shutdown via abortController signal,
+		// allowing the finally block to run and clean up child processes.
+		// The io_uring I/O is still performed before abort takes effect.
 		const cwd = argValue("--cwd");
 		const runId = argValue("--run-id");
 		if (cwd && runId) {
 			try {
-				const loaded = loadRunManifestById(cwd, runId);
+				const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 				if (loaded)
 					appendEvent(loaded.manifest.eventsPath, {
 						type: "async.sigterm_ignored",
@@ -297,6 +353,8 @@ async function main(): Promise<void> {
 				/* best-effort */
 			}
 		}
+		// Trigger graceful shutdown via abort signal so finally block runs
+		abortController.abort();
 	});
 	process.on("SIGINT", () => {
 		signalLog("SIGINT");
@@ -327,7 +385,7 @@ async function main(): Promise<void> {
 			process.on(sig, () => {
 				signalLog(sig);
 				try {
-					const loaded = loadRunManifestById(cwd!, runId!);
+					const loaded = loadRunManifestById(cwd!, runId!); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 					if (loaded)
 						appendEvent(loaded.manifest.eventsPath, {
 							type: "async.signal",
@@ -354,7 +412,7 @@ async function main(): Promise<void> {
 		const codeStr = code === undefined ? "<none>" : String(code);
 		if (cwd2 && runId2) {
 			try {
-				const loaded = loadRunManifestById(cwd2, runId2);
+				const loaded = loadRunManifestById(cwd2, runId2); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 				if (loaded) {
 					appendEvent(loaded.manifest.eventsPath, {
 						type: "async.exit",
@@ -393,7 +451,7 @@ async function main(): Promise<void> {
 		);
 	}
 
-	const loaded = loadRunManifestById(cwd, runId);
+	const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 	if (!loaded) throw new Error(`Run '${runId}' not found.`);
 	let { manifest, tasks } = loaded;
 
@@ -409,7 +467,13 @@ async function main(): Promise<void> {
 		eventsPath: loaded.manifest.eventsPath,
 	};
 	const abortController = new AbortController();
-	setupUnhandledRejectionGuard(rejectionGuardState, abortController);
+	// FIX Issues #2& #4: Flag to signal that an unhandled rejection occurred.
+	// When set, runCleanup() will ensure process.exit(1) is called after cleanup.
+	let exitDueToRejection = false;
+	const setExitFlag = (): void => {
+		exitDueToRejection = true;
+	};
+	setupUnhandledRejectionGuard(rejectionGuardState, abortController, setExitFlag);
 
 	appendEvent(manifest.eventsPath, {
 		type: "async.started",
@@ -570,7 +634,7 @@ async function main(): Promise<void> {
 	} catch (error) {
 		// Terminate live agents on failure too — agents are done when the run fails
 		try {
-			const loaded = loadRunManifestById(cwd, runId);
+			const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 			if (loaded) {
 				// LAZY: live-agent-manager only needed on failure cleanup path; avoid module load at hot path.
 				const { terminateLiveAgentsForRun } = await import(
@@ -604,26 +668,14 @@ async function main(): Promise<void> {
 			`[background-runner] DEBUG: catch block, error=${error instanceof Error ? error.message : String(error)}`,
 		);
 	} finally {
-		console.log(
-			`[background-runner] DEBUG: finally block, exitCode=${process.exitCode}`,
-		);
-		stopInterruptGuard();
-		stopParentGuard();
-		stopHeartbeat();
-		// FIX: clearInterval FIRST, then kill children. This ensures the heartbeat
-		// interval is always cleaned up even if terminateActiveChildPiProcesses throws.
-		clearInterval(keepAlive);
-		// FIX: Wrap child process termination in try/catch so errors don't prevent
-		// the finally block from completing. We log but don't re-throw since we're
-		// already exiting.
-		let killed = 0;
-		try {
-			killed = terminateActiveChildPiProcesses();
-		} catch (error) {
-			console.log(`[background-runner] finally: terminateActiveChildPiProcesses error: ${error instanceof Error ? error.message : String(error)}`);
-		}
-		console.log(
-			`[background-runner] finally: killed ${killed} child processes`,
+		// FIX Issue #4: Use shared runCleanup() function for consistent cleanup
+		// across all exit paths (normal, unhandled rejection, main() exception).
+		runCleanup(
+			stopInterruptGuard,
+			stopParentGuard,
+			stopHeartbeat,
+			keepAlive,
+			exitDueToRejection,
 		);
 	}
 }

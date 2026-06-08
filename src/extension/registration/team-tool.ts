@@ -136,7 +136,7 @@ function startTeamToolProgressBinder(onUpdate: OnUpdate | undefined): TeamToolPr
 				onUpdate({ content: [{ type: "text", text: `team status=starting elapsed=${elapsed}s` }] });
 				return;
 			}
-			const loaded = loadRunManifestById(cwd, runId);
+			const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 			if (!loaded) {
 				const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
 				onUpdate({ content: [{ type: "text", text: `team run=${runId} elapsed=${elapsed}s (manifest pending)` }] });

@@ -154,7 +154,27 @@ function acquireLockWithRetry(filePath: string, staleMs: number, kind: LockKind 
 				// Lock is fresh AND holder is alive — fail fast
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
-			// Lock is stale OR holder is dead — safe to clear
+			// FIX (TOCTOU): Use O_EXCL open to atomically verify-and-remove
+			// the stale lock in one operation. If a competing process acquired
+			// the lock between our staleness check and this open, O_EXCL fails
+			// with EEXIST and we retry the full acquire sequence.
+			let fd = -1;
+			try {
+				fd = fs.openSync(filePath, fs.constants.O_EXCL | fs.constants.O_RDONLY);
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "EEXIST") {
+					// Lock was re-acquired — retry the full sequence
+					sleepSync(Math.min(250, 25 * 2 ** attempt));
+					attempt++;
+					continue;
+				}
+				throw error;
+			} finally {
+				if (fd >= 0) fs.closeSync(fd);
+			}
+			// O_EXCL succeeded — we atomically verified the lock is still free.
+			// Now it is safe to remove it.
 			try {
 				fs.rmSync(filePath, { force: true });
 			} catch { /* race — let loop retry */ }
@@ -191,7 +211,28 @@ async function acquireLockWithRetryAsync(filePath: string, staleMs: number, kind
 			if (!isStale && isHolderAlive) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
-			// Lock is stale OR holder is dead — safe to clear
+			// FIX (TOCTOU): Use O_EXCL open to atomically verify-and-remove
+			// the stale lock in one operation. If a competing process acquired
+			// the lock between our staleness check and this open, O_EXCL fails
+			// with EEXIST and we retry the full acquire sequence.
+			let fd = -1;
+			try {
+				fd = fs.openSync(filePath, fs.constants.O_EXCL | fs.constants.O_RDONLY);
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "EEXIST") {
+					// Lock was re-acquired — retry the full sequence
+					const delay = Math.min(250, 25 * 2 ** attempt);
+					await sleep(delay);
+					attempt++;
+					continue;
+				}
+				throw error;
+			} finally {
+				if (fd >= 0) fs.closeSync(fd);
+			}
+			// O_EXCL succeeded — we atomically verified the lock is still free.
+			// Now it is safe to remove it.
 			try {
 				fs.rmSync(filePath, { force: true });
 			} catch { /* race — let loop retry */ }

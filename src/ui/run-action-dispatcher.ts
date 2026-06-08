@@ -81,7 +81,7 @@ export function dispatchHealthRecovery(ctx: ExtensionContext, runId: string): Pr
 
 export async function dispatchKillStaleWorkers(ctx: ExtensionContext, runId: string): Promise<RunActionResult> {
 	try {
-		const loaded = loadRunManifestById(ctx.cwd, runId);
+		const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 		if (!loaded) return { ok: false, message: `Run '${runId}' not found.` };
 		const currentMs = Date.now();
 		const staleMs = 60_000;
@@ -113,7 +113,7 @@ export async function dispatchDiagnosticExport(ctx: ExtensionContext, runId: str
 
 /** @internal */
 function defaultNudgeAgentId(ctx: Pick<ExtensionContext, "cwd">, runId: string): string | undefined {
-	const loaded = loadRunManifestById(ctx.cwd, runId);
+	const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 	if (!loaded) return undefined;
 	return readCrewAgents(loaded.manifest).find((agent) => agent.status === "running" || agent.status === "queued")?.taskId;
 }

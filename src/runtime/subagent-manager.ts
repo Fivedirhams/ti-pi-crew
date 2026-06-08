@@ -196,7 +196,7 @@ function totalRunTurns(
 	runId: string | undefined,
 ): number | undefined {
 	if (!runId) return undefined;
-	const loaded = loadRunManifestById(cwd, runId);
+	const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return undefined;
 	let total = 0;
 	let hasTurns = false;
@@ -493,7 +493,7 @@ export class SubagentManager {
 			record.runId &&
 			(record.status === "running" || record.status === "blocked")
 		) {
-			const loaded = loadRunManifestById(cwd, record.runId);
+			const loaded = loadRunManifestById(cwd, record.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 			if (!loaded) {
 				await new Promise((resolve) =>
 					setTimeout(resolve, this.pollIntervalMs),
@@ -549,7 +549,7 @@ export class SubagentManager {
 			const current = this.records.get(record.id);
 			if (!current || current.status !== "blocked" || !current.runId)
 				return;
-			const loaded = loadRunManifestById(cwd, current.runId);
+			const loaded = loadRunManifestById(cwd, current.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 			if (
 				!loaded ||
 				loaded.manifest.status === "blocked" ||

@@ -39,7 +39,8 @@ export function detectInterruptedRuns(cwd: string, manifestCache: ManifestCache,
 	for (const manifest of manifestCache.list(50)) {
 		if (manifest.status !== "running" && manifest.status !== "blocked") continue;
 		if (manifest.async?.pid !== undefined && checkProcessLiveness(manifest.async.pid).alive) continue;
-		const loaded = loadRunManifestById(cwd, manifest.runId);
+		// NOTE: no withRunLock — best-effort only; concurrent writes may cause inconsistency
+		const loaded = loadRunManifestById(cwd, manifest.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		if (!loaded) continue;
 		const resumableTasks = loaded.tasks.filter((task) => shouldRecoverTask(task, deadMs)).map((task) => task.id);
 		if (!resumableTasks.length) continue;
@@ -49,7 +50,7 @@ export function detectInterruptedRuns(cwd: string, manifestCache: ManifestCache,
 }
 
 export async function applyRecoveryPlan(plan: RecoveryPlan, ctx: Pick<ExtensionContext, "cwd">, registry?: MetricRegistry): Promise<void> {
-	const loaded = loadRunManifestById(ctx.cwd, plan.runId);
+	const loaded = loadRunManifestById(ctx.cwd, plan.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) throw new Error(`Run '${plan.runId}' not found.`);
 
 	const hookReport = await executeHook("run_recovery", { runId: plan.runId, cwd: ctx.cwd });
@@ -67,7 +68,7 @@ export async function applyRecoveryPlan(plan: RecoveryPlan, ctx: Pick<ExtensionC
 }
 
 export function declineRecoveryPlan(plan: RecoveryPlan, ctx: Pick<ExtensionContext, "cwd">): void {
-	const loaded = loadRunManifestById(ctx.cwd, plan.runId);
+	const loaded = loadRunManifestById(ctx.cwd, plan.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) throw new Error(`Run '${plan.runId}' not found.`);
 	// Log the event first — if appendEvent fails, state remains consistent.
 	appendEvent(loaded.manifest.eventsPath, { type: "crew.run.recovery_declined", runId: plan.runId, message: "Interrupted run was not resumed.", data: { recoveredFromSeq: plan.lastEventSeq } });
@@ -119,7 +120,7 @@ export function cancelOrphanedRuns(
 		}
 
 		// Check for recent heartbeat activity
-		const loaded = loadRunManifestById(cwd, manifest.runId);
+		const loaded = loadRunManifestById(cwd, manifest.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		if (!loaded) continue;
 
 		const hasRecentActivity = loaded.tasks.some((task) => {
@@ -142,7 +143,7 @@ export function cancelOrphanedRuns(
 		// Orphan confirmed — cancel all running tasks
 		let cancelledRun = false;
 		withRunLockSync(loaded.manifest, () => {
-			const fresh = loadRunManifestById(cwd, manifest.runId);
+			const fresh = loadRunManifestById(cwd, manifest.runId); // NOTE: inside withRunLockSync - consistent read
 			if (!fresh || (fresh.manifest.status !== "running" && fresh.manifest.status !== "blocked")) return;
 
 			const now_iso = new Date(now).toISOString();
@@ -257,7 +258,7 @@ export function purgeStaleActiveRunIndex(staleThresholdMs = 300_000, now = Date.
 				if (Number.isFinite(updatedAt) && now - updatedAt > staleThresholdMs) {
 					// Dead PID + stale update → cancel the manifest and unregister
 					try {
-						const fullLoaded = loadRunManifestById(entry.cwd, entry.runId);
+						const fullLoaded = loadRunManifestById(entry.cwd, entry.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 						if (fullLoaded) {
 							const now_iso = new Date(now).toISOString();
 							const repairedTasks = fullLoaded.tasks.map((task) => {
@@ -288,7 +289,7 @@ export function purgeStaleActiveRunIndex(staleThresholdMs = 300_000, now = Date.
 			const updatedAt = new Date(entry.updatedAt).getTime();
 			if (Number.isFinite(updatedAt) && now - updatedAt > staleThresholdMs) {
 				try {
-					const fullLoaded = loadRunManifestById(entry.cwd, entry.runId);
+					const fullLoaded = loadRunManifestById(entry.cwd, entry.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 					if (fullLoaded && fullLoaded.manifest.status === "running") {
 						const now_iso = new Date(now).toISOString();
 						const repairedTasks = fullLoaded.tasks.map((task) => {
@@ -322,12 +323,12 @@ export function reconcileAllStaleRuns(cwd: string, manifestCache: ManifestCache,
 	const results: ReconcileResult[] = [];
 	for (const manifest of manifestCache.list(50)) {
 		if (manifest.status !== "running" && manifest.status !== "blocked") continue;
-		const loaded = loadRunManifestById(cwd, manifest.runId);
+		const loaded = loadRunManifestById(cwd, manifest.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		if (!loaded) continue;
 		// Use lock to prevent race with cancel/status handlers modifying the same run
 		withRunLockSync(loaded.manifest, () => {
 			// Re-read inside lock to get freshest data
-			const fresh = loadRunManifestById(cwd, manifest.runId);
+			const fresh = loadRunManifestById(cwd, manifest.runId); // NOTE: inside withRunLockSync - consistent read
 			if (!fresh || (fresh.manifest.status !== "running" && fresh.manifest.status !== "blocked")) return;
 			const result = reconcileStaleRun(fresh.manifest, fresh.tasks, now);
 			if (result.repaired || result.verdict === "result_exists") {

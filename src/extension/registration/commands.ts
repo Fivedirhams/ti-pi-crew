@@ -154,7 +154,7 @@ function teamCommandContext(ctx: ExtensionCommandContext): ExtensionCommandConte
 }
 
 async function handleHealthDashboardAction(ctx: ExtensionCommandContext, selection: RunDashboardSelection): Promise<void> {
-	const loaded = loadRunManifestById(ctx.cwd, selection.runId);
+	const loaded = loadRunManifestById(ctx.cwd, selection.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) {
 		depsNotify(ctx, `Run '${selection.runId}' not found.`, "error");
 		return;
@@ -379,7 +379,7 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 	pi.registerCommand("team-result", { description: "Open a pi-crew agent result viewer: <runId> [taskId]", handler: async (args: string, ctx: ExtensionCommandContext) => {
 		const [runId, rawTaskId] = args.trim().split(/\s+/).filter(Boolean);
 		const selected = await selectAgentTask(ctx, runId, rawTaskId);
-		const loaded = selected ? loadRunManifestById(ctx.cwd, selected.runId) : undefined;
+		const loaded = selected ? loadRunManifestById(ctx.cwd, selected.runId) : undefined; // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 		if (ctx.hasUI && loaded) {
 			const agent = readCrewAgents(loaded.manifest).find((item) => item.taskId === selected?.taskId || item.id === selected?.taskId) ?? readCrewAgents(loaded.manifest)[0];
 			const resultText = agent?.resultArtifactPath ? commandText(await handleTeamTool({ action: "api", runId: selected?.runId ?? "", config: { operation: "read-agent-output", agentId: agent.taskId, maxBytes: 64_000 } }, teamCommandContext(ctx))) : "(no result)";

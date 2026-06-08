@@ -15,7 +15,7 @@ export class AgentPickerOverlay {
 	private selected = 0;
 
 	constructor(opts: { cwd: string; runId: string; done: (selection: AgentPickerSelection | undefined) => void; theme?: unknown }) {
-		const loaded = loadRunManifestById(opts.cwd, opts.runId);
+		const loaded = loadRunManifestById(opts.cwd, opts.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 		this.agents = loaded ? readCrewAgents(loaded.manifest) : [];
 		this.done = opts.done;
 		this.theme = asCrewTheme(opts.theme ?? {});

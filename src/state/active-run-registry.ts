@@ -177,47 +177,53 @@ function atomicWriteBinary(filePath: string, entries: ActiveRunRegistryEntry[]):
 
 function writeEntries(entries: ActiveRunRegistryEntry[]): void {
 	const max = DEFAULT_CACHE.manifestMaxEntries;
-	// FIX: Emit warning when entries overflow the cap, instead of silent drop.
+	// FIX Issue 3: Throw instead of silently truncating when cap is exceeded.
 	if (entries.length > max) {
-		logInternalError(
-			"active-run-registry.overflow",
-			new Error(`${entries.length - max} entries dropped (cap=${max})`),
-			JSON.stringify({ dropped: entries.length - max, total: entries.length, cap: max }),
-		);
+		throw new Error(`${entries.length - max} entries would be dropped (cap=${max}) — refusing to write partial registry`);
 	}
-	const trimmed = entries.slice(0, max);
 	fs.mkdirSync(path.dirname(registryPath()), { recursive: true });
 	// FIX Issues 1 & 2: Write both to temp files first, then rename both atomically.
 	// If either rename fails, neither file is updated — registry stays consistent.
 	const tempJson = `${registryPath()}.${process.pid}.${Date.now()}.tmp`;
 	const tempBin = `${registryBinaryPath()}.${process.pid}.${Date.now()}.tmp`;
+	let jsonRenamed = false;
+	let binRenamed = false;
 	try {
 		// Write JSON to temp first
-		atomicWriteJson(tempJson, trimmed);
+		atomicWriteJson(tempJson, entries);
 		// Write binary to temp (atomic pattern)
-		atomicWriteBinary(tempBin, trimmed);
+		atomicWriteBinary(tempBin, entries);
 		// Both written successfully — rename both atomically
 		renameWithRetry(tempJson, registryPath());
+		jsonRenamed = true;
 		renameWithRetry(tempBin, registryBinaryPath());
+		binRenamed = true;
 	} catch (error) {
-		// Cleanup temp files on failure
+		// Cleanup temp files on failure — if either rename succeeded, delete both to keep registry consistent
+		if (jsonRenamed || binRenamed) {
+			try { fs.rmSync(registryPath(), { force: true }); } catch { /* best-effort */ }
+			try { fs.rmSync(registryBinaryPath(), { force: true }); } catch { /* best-effort */ }
+		}
 		try { fs.rmSync(tempJson, { force: true }); } catch { /* best-effort */ }
 		try { fs.rmSync(tempBin, { force: true }); } catch { /* best-effort */ }
-		logInternalError("active-run-registry.write", error);
+		throw error;
 	}
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "blocked"]);
 
 /**
- * Filter out entries that are no longer active: terminal status or missing manifest.
- * This prevents unbounded growth of the active-run-index.json file.
+ * FIX Issue 2: Filter out entries that are no longer active: terminal status, missing manifest,
+ * or symlink-unsafe paths. This prevents unbounded growth and guards against symlink attacks.
  */
 function filterAliveEntries(entries: ActiveRunRegistryEntry[]): ActiveRunRegistryEntry[] {
 	return entries.filter((entry) => {
 		try {
 			if (!fs.existsSync(entry.cwd)) return false;
 			if (!fs.existsSync(entry.manifestPath)) return false;
+			// FIX Issue 2: Guard against symlink attacks on stateRoot and manifestPath
+			if (!isSymlinkSafePath(entry.stateRoot)) return false;
+			if (!isSymlinkSafePath(entry.manifestPath)) return false;
 		} catch {
 			return false;
 		}
@@ -254,7 +260,13 @@ export function registerActiveRun(manifest: TeamRunManifest): void {
 		// Inline cleanup: remove terminal-status and stale entries before writing.
 		// This prevents unbounded growth between sessions.
 		const alive = filterAliveEntries(existing);
-		writeEntries([entry, ...alive]);
+		// FIX Issue 4: Also filter the new entry being registered through filterAliveEntries
+		// to exclude it if it is terminal (e.g. completed between call and write).
+		const filteredEntry = filterAliveEntries([entry]).length > 0 ? entry : null;
+		if (filteredEntry === null) {
+			throw new Error(`Cannot register run ${manifest.runId}: entry is terminal or paths are not symlink-safe`);
+		}
+		writeEntries([filteredEntry, ...alive]);
 	});
 }
 

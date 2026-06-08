@@ -174,6 +174,22 @@ export interface ChildPiRunResult {
 }
 
 export function buildChildPiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): SpawnOptions {
+	// SECURITY FIX (Issue #1): Validate cwd before passing to spawn.
+	// If cwd comes from an untrusted source (user input, workspace config), a malicious cwd
+	// could cause the child process to operate in an attacker-controlled directory,
+	// enabling path traversal attacks, unintended file access, or exposure of sensitive paths.
+	// Use realpathSync to resolve any symlinks and verify the path exists and is a directory.
+	let validatedCwd: string;
+	try {
+		validatedCwd = fs.realpathSync(cwd);
+		const stats = fs.statSync(validatedCwd);
+		if (!stats.isDirectory()) {
+			throw new Error(`cwd is not a directory: ${cwd}`);
+		}
+	} catch (error) {
+		throw new Error(`Invalid cwd: ${cwd} — ${error instanceof Error ? error.message : String(error)}`);
+	}
+
 	// Filter out env vars whose keys match secret patterns to avoid leaking credentials to child processes.
 	// IMPORTANT: preserve model provider API keys — they are needed by the child Pi to call the LLM.
 	// Also preserve essential non-secret vars (PATH, HOME, USER, etc.) so the child process can function.
@@ -260,7 +276,7 @@ export function buildChildPiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): S
 	// FIX: Removed delete workarounds — with explicit allowlist, these vars
 	// are no longer auto-leaked. The wildcard approach was fragile.
 	return {
-		cwd,
+		cwd: validatedCwd,
 		env: { ...filteredEnv, PI_CREW_PARENT_PID: String(process.pid) },
 		stdio: ["ignore", "pipe", "pipe"], // stdin=ignore: child doesn't wait for input; task comes via CLI args
 		detached: process.platform !== "win32",
@@ -427,9 +443,16 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 	if (depth.blocked) return { exitCode: 1, stdout: "", stderr: `pi-crew depth guard blocked child worker: depth ${depth.depth} >= max ${depth.maxDepth}` };
 	const mock = process.env.PI_TEAMS_MOCK_CHILD_PI;
 	if (mock) {
-		// SECURITY: Require explicit PI_CREW_ALLOW_MOCK=1 to activate mock mode.
-		// PI_CREW_ALLOW_MOCK must be set in the parent process env (not by child hooks)
-		// since sanitizeEnvSecrets only passes PI_CREW_* vars from the parent.
+		// SECURITY (Issue #2): Mock mode security model is intentionally asymmetric.
+		// PI_TEAMS_MOCK_CHILD_PI is in the allowlist (passed to children) but
+		// PI_CREW_ALLOW_MOCK is NOT in the allowlist — it is only checked in the
+		// parent process scope. This means:
+		//   (1) If an attacker sets PI_CREW_ALLOW_MOCK in the parent's environment,
+		//       it will NOT be passed to child processes (safe).
+		//   (2) Mock mode activation in the child always fails the PI_CREW_ALLOW_MOCK
+		//       check, so mock mode can only be triggered from the parent process.
+		// This asymmetry is intentional: PI_CREW_ALLOW_MOCK must be set in the Pi root
+		// process (the entry point that spawns children), not inherited from a parent.
 		// Setup hooks cannot inject PI_CREW_ALLOW_MOCK into the parent's env.
 		const allowMock = process.env.PI_CREW_ALLOW_MOCK === "1" || process.env.PI_CREW_ALLOW_MOCK === "true";
 		if (!allowMock) {
@@ -457,6 +480,11 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 	const spawnSpec = getPiSpawnCommand(built.args);
 	try {
 		return await new Promise<ChildPiRunResult>((resolve) => {
+			// SECURITY (Issue #3): built.env contains only PI_CREW_* execution-control vars (NOT secrets).
+			// It is safe to spread built.env after process.env because sanitizeEnvSecrets will filter
+			// any secret values before the env reaches spawn(). However, if built.env ever gains
+			// secret content without corresponding allowlist filtering, secrets would leak to children.
+			// This comment serves as a warning: built.env must never contain secret values.
 			const child = spawn(spawnSpec.command, spawnSpec.args, buildChildPiSpawnOptions(input.cwd, { ...process.env, ...built.env }));
 			if (child.pid) {
 				activeChildProcesses.set(child.pid, child);

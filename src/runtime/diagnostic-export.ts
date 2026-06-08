@@ -74,7 +74,7 @@ function buildSnapshot(manifest: TeamRunManifest, tasks: TeamTaskState[]): RunUi
 }
 
 export async function exportDiagnostic(ctx: Pick<ExtensionContext, "cwd">, runId: string, options: { registry?: MetricRegistry } = {}): Promise<{ path: string; report: DiagnosticReport }> {
-	const loaded = loadRunManifestById(ctx.cwd, runId);
+	const loaded = loadRunManifestById(ctx.cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
 	if (!loaded) throw new Error(`Run '${runId}' not found.`);
 	const exportedAt = new Date().toISOString();
 	const safeTimestamp = exportedAt.replace(/[:.]/g, "-");

@@ -209,7 +209,7 @@ export function handleExplain(params: {
     return result("explain requires runId", { action: "explain", status: "error" }, true);
   }
 
-  const loaded = loadRunManifestById(cwd, params.runId);
+  const loaded = loadRunManifestById(cwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
   if (!loaded) {
     return result(`Run '${params.runId}' not found.`, { action: "explain", status: "error" }, true);
   }
