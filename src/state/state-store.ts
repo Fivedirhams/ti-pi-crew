@@ -432,12 +432,9 @@ export function loadRunManifestById(cwd: string, runId: string): { manifest: Tea
 		manifestStat = freshStat;
 		tasksStat = freshTasksStat;
 	}
-	// FIX: After 3 attempts with no convergence, perform a final consistency check.
-	// If manifest mtime > tasks mtime, the manifest is newer and likely inconsistent.
-	// Return undefined - caller should retry with lock for strict consistency if needed.
-	if (manifest && tasksStat && manifestStat.mtimeMs > (tasksStat.mtimeMs ?? 0)) {
-		return undefined;
-	}
+	// NOTE: manifest mtime may legitimately be >= tasks mtime because
+	// saveManifestAndTasksAtomicSync writes manifest before tasks. Do NOT
+	// fail based on this comparison alone - it does not indicate corruption.
 	if (!manifest || !validateRunManifestPaths(cwd, runId, manifest, stateRoot, tasksPath)) return undefined;
 	setManifestCache(stateRoot, {
 		manifest,
@@ -501,12 +498,9 @@ export async function loadRunManifestByIdAsync(cwd: string, runId: string): Prom
 		manifestStat = freshStat;
 		tasksStat = freshTasksStat;
 	}
-	// FIX: After 3 attempts with no convergence, perform a final consistency check.
-	// If manifest mtime > tasks mtime, the manifest is newer and likely inconsistent.
-	// Return undefined - caller should retry with lock for strict consistency if needed.
-	if (manifest && tasksStat && manifestStat.mtimeMs > (tasksStat.mtimeMs ?? 0)) {
-		return undefined;
-	}
+	// NOTE: manifest mtime may legitimately be >= tasks mtime because
+	// saveManifestAndTasksAtomicSync writes manifest before tasks. Do NOT
+	// fail based on this comparison alone - it does not indicate corruption.
 
 	if (!manifest || !validateRunManifestPaths(cwd, runId, manifest, stateRoot, tasksPath)) return undefined;
 	setManifestCache(stateRoot, { manifest, tasks: tasks ?? [], manifestMtimeMs: manifestStat.mtimeMs, manifestSize: manifestStat.size, tasksMtimeMs, tasksSize: tasksStat?.size ?? 0 });
