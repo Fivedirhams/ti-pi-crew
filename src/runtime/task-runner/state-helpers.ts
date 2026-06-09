@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import type { TaskCheckpointState, TeamRunManifest, TeamTaskState } from "../../state/types.ts";
 import { loadRunManifestById, saveRunTasks } from "../../state/state-store.ts";
 import { recordFromTask, upsertCrewAgent } from "../crew-agent-records.ts";
@@ -8,17 +9,68 @@ export function updateTask(tasks: TeamTaskState[], updated: TeamTaskState): Team
 	return tasks.map((task) => task.id === updated.id ? updated : task);
 }
 
+/**
+ * Persist a single task update using compare-and-swap under the run lock.
+ *
+ * Problem: The naive read-merge-write pattern is vulnerable to a read-modify-write
+ * race. When two parallel task completions race:
+ *   1. Task A loads tasks [A(running), B(running)], writes [A(completed), B(running)]
+ *   2. Task B loads [A(running), B(running)] (stale, before A's write), writes [A(running), B(completed)]
+ *   Result: Task A's completed status is clobbered.
+ *
+ * Solution: Use mtime-based CAS under the run lock. Before writing, stat the tasks file
+ * to record its mtime. After merging, re-stat — if mtime changed, another writer
+ * committed first; retry with the fresh state. This is O(retry) under contention but
+ * converges in the normal single-writer case.
+ */
 export function persistSingleTaskUpdate(manifest: TeamRunManifest, fallbackTasks: TeamTaskState[], updated: TeamTaskState): TeamTaskState[] {
+	let baseMtime = 0;
+	try {
+		baseMtime = fs.statSync(manifest.tasksPath).mtimeMs;
+	} catch {
+		// File doesn't exist yet — baseMtime=0 means "anything is fine"
+		baseMtime = 0;
+	}
+
 	return withRunLockSync(manifest, () => {
-		const latest = loadRunManifestById(manifest.cwd, manifest.runId)?.tasks ?? fallbackTasks;
-		const merged = updateTask(latest, updated);
+		let merged: TeamTaskState[];
+
+		for (let attempt = 0; attempt < 10; attempt++) {
+			const latest = loadRunManifestById(manifest.cwd, manifest.runId)?.tasks ?? fallbackTasks;
+			merged = updateTask(latest, updated);
+
+			// Re-stat to detect concurrent writes
+			let currentMtime: number;
+			try {
+				currentMtime = fs.statSync(manifest.tasksPath).mtimeMs;
+			} catch {
+				currentMtime = 0;
+			}
+
+			if (currentMtime !== baseMtime) {
+				// Another writer committed — their update is in latest, re-merge on top
+				baseMtime = currentMtime;
+				continue;
+			}
+
+			// No concurrent writer — check that our merged result is based on the
+			// same base we observed (no intermediate writer between our load and check)
+			const recheckMtime = fs.statSync(manifest.tasksPath).mtimeMs;
+			if (recheckMtime !== baseMtime) {
+				baseMtime = recheckMtime;
+				continue;
+			}
+
+			break;
+		}
+
 		try {
-			saveRunTasks(manifest, merged);
+			saveRunTasks(manifest, merged!);
 		} catch (err) {
 			logInternalError("persistSingleTaskUpdate", err);
 			throw err;
 		}
-		return merged;
+		return merged!;
 	});
 }
 

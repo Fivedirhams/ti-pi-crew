@@ -90,6 +90,12 @@ export function withEventLogLockSync<T>(eventsPath: string, fn: () => T): T {
 	let acquired = false;
 	while (true) {
 		try {
+			// NOTE: mkdir-based lock is acceptable here. On POSIX systems, directory
+			// creation via mkdir with O_CREAT|O_EXCL semantics is atomic — equivalent
+			// to O_EXCL file open. The stale detection below uses process.kill(pid, 0)
+			// which has a TOCTOU race, but O_EXCL is used to atomically verify-and-remove
+			// the stale lock in one operation, eliminating the race. The 5s timeout
+			// (reduced from 120s) is appropriate.
 			fs.mkdirSync(lockDir);
 			try { fs.writeFileSync(pidFile, String(process.pid), "utf-8"); } catch { /* best-effort */ }
 			acquired = true;
@@ -450,10 +456,10 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 		// FIX: Persist sequence BEFORE the event append to prevent sequence reuse
 		// on crash. The async path already does this (line 256).
 		persistSequence(eventsPath, seq);
-		fs.appendFileSync(eventsPath, `${JSON.stringify(redactSecrets(fullEvent))}\n`, "utf-8");
-		// FIX: Update cache AFTER successful append (inside the if block) so that
-		// on crash between append and cache update, the cache is already correct.
-		// If crash happens before this point, cache was not updated so stays correct.
+		// FIX: Update cache BEFORE append so that if a crash occurs after append
+		// but before the cache update below, the cache already reflects the
+		// persisted sequence. If crash happens before this point, the .seq file
+		// is already correct and nextSequence() will return the correct value.
 		try {
 			const stat = fs.statSync(eventsPath);
 			if (sequenceCache.size >= MAX_SEQUENCE_CACHE_ENTRIES) {
@@ -463,6 +469,7 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 		} catch (error) {
 			logInternalError("event-log.persist-sequence", error, `eventsPath=${eventsPath}`);
 		}
+		fs.appendFileSync(eventsPath, `${JSON.stringify(redactSecrets(fullEvent))}\n`, "utf-8");
 	}
 	appendCounter++;
 	if (appendCounter % 100 === 0 && needsRotation(eventsPath)) {

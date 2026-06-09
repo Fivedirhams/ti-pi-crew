@@ -595,8 +595,8 @@ export async function runTeamTask(
 									manifest.runId,
 									event,
 								);
-							} catch {
-								/* overflow tracking errors should not affect task */
+							} catch (err) {
+								logInternalError("task-runner.on-json-event", err as Error, `taskId=${task.id}`);
 							}
 						}
 						if (

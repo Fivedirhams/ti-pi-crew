@@ -4,6 +4,9 @@ import { allAgents, discoverAgents } from "../agents/discover-agents.ts";
 import { loadConfig } from "../config/config.ts";
 import { appendEvent } from "../state/event-log.ts";
 import {
+	withRunLockSync,
+} from "../state/locks.ts";
+import {
 	loadRunManifestById,
 	saveRunManifest,
 	updateRunStatus,
@@ -17,6 +20,7 @@ import {
 // Heavy runtime — lazy-loaded to avoid pulling team-runner into background-runner
 // at module load time. Only needed when a background run actually starts.
 import type { executeTeamRun as ExecuteTeamRunFn } from "./team-runner.ts";
+import type { TeamRunManifest, TeamTaskState } from "../state/types.ts";
 
 let _cachedExecuteTeamRun: typeof ExecuteTeamRunFn | undefined;
 async function executeTeamRun(
@@ -210,6 +214,7 @@ function runCleanup(
 	stopHeartbeat: () => void,
 	keepAlive: NodeJS.Timeout,
 	exitDueToRejection: boolean,
+	eventsPath?: string,
 ): void {
 	console.log(
 		`[background-runner] DEBUG: runCleanup, exitDueToRejection=${exitDueToRejection}`,
@@ -241,6 +246,18 @@ function runCleanup(
 		console.log(
 			`[background-runner] runCleanup: unregisterWorker error: ${error instanceof Error ? error.message : String(error)}`,
 		);
+		if (eventsPath) {
+			try {
+				appendEvent(eventsPath, {
+					type: "background.unregister_worker_failed",
+					runId: argValue("--run-id") ?? "unknown",
+					message: `unregisterWorker failed: ${error instanceof Error ? error.message : String(error)}`,
+					data: { pid: process.pid },
+				});
+			} catch {
+				/* best-effort */
+			}
+		}
 	}
 	// FIX Issues #2 & #4: If an unhandled rejection occurred, exit with code 1
 	// after cleanup completes. This ensures the finally block runs cleanup first,
@@ -340,7 +357,19 @@ async function main(): Promise<void> {
 		throw new Error(
 			"Usage: background-runner.ts --cwd <cwd> --run-id <runId>",
 		);
-	const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency;
+	// FIX Issue #3: Wrap in withRunLockSync to prevent concurrent background-runners
+	// for the same runId from reading stale manifest state. If lock cannot be
+	// acquired within 5s, fail immediately rather than proceeding with stale data.
+	let loaded: { manifest: TeamRunManifest; tasks: TeamTaskState[] } | undefined;
+	try {
+		loaded = withRunLockSync(
+			{ stateRoot: "", runId, cwd } as TeamRunManifest,
+			() => loadRunManifestById(cwd, runId),
+			{ staleMs: 5000 },
+		);
+	} catch (lockErr) {
+		throw new Error(`Failed to acquire lock for run '${runId}': ${lockErr instanceof Error ? lockErr.message : String(lockErr)}`);
+	}
 	if (!loaded) throw new Error(`Run '${runId}' not found.`);
 	let { manifest, tasks } = loaded;
 	const abortController = new AbortController();
@@ -647,6 +676,7 @@ async function main(): Promise<void> {
 			stopHeartbeat,
 			keepAlive,
 			exitDueToRejection,
+			manifest.eventsPath,
 		);
 	}
 }

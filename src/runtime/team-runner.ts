@@ -11,6 +11,7 @@ import { appendEvent, appendEventAsync, appendEventFireAndForget } from "../stat
 import type { TeamConfig } from "../teams/team-config.ts";
 import type { ArtifactDescriptor, PolicyDecision, TeamRunManifest, TaskAttemptState, TeamTaskState } from "../state/types.ts";
 import { loadRunManifestById, saveRunManifest, saveRunManifestAsync, saveRunTasksAsync, updateRunStatus } from "../state/state-store.ts";
+import { withRunLock } from "../state/locks.ts";
 import { aggregateUsage, formatUsage } from "../state/usage.ts";
 import type { WorkflowConfig, WorkflowStep } from "../workflows/workflow-config.ts";
 import { evaluateCrewPolicy, summarizePolicyDecisions } from "./policy-engine.ts";
@@ -145,8 +146,17 @@ function shouldMergeTaskUpdate(current: TeamTaskState, updated: TeamTaskState): 
 	// but completed is the success terminal state and should not be reachable from
 	// failed via a stale merge. The check above only guards non-terminal→terminal.
 	if (current.status === "failed" && updated.status === "completed") return false;
+	// Guard: when current is "running" but has resultArtifact (another worker already
+	// completed it), a stale updated with status="running" and no resultArtifact
+	// must not overwrite the actual completed state.
+	if (current.status === updated.status && updated.status === "running" && Boolean(current.resultArtifact) && !updated.resultArtifact) return false;
 	// Prevent a stale completed task from overwriting a fresher one.
-	if (current.finishedAt && updated.finishedAt) {
+	// Restructure to handle undefined current.finishedAt as a special case:
+	// - undefined current + valid updated: allow the update
+	// - valid current + undefined updated: block the update (don't lose completion time)
+	// - both undefined: finishedAt guard does not apply, fall through to heartbeat check
+	// - both valid: compare timestamps as before
+	if (current.finishedAt !== undefined && updated.finishedAt !== undefined) {
 		const currentTime = safeFinishedAt(current);
 		const updatedTime = safeFinishedAt(updated);
 		// Malformed finishedAt (NaN) is treated as Infinity — invalid state should be
@@ -157,9 +167,10 @@ function shouldMergeTaskUpdate(current: TeamTaskState, updated: TeamTaskState): 
 		}
 		if (updatedTime < currentTime) return false;
 	}
-	// FIX: An update with no completion time should not overwrite one that has a
-	// completion time. NaN comparisons always return false, so guard explicitly.
-	if (!updated.finishedAt) return false;
+	// Block if updated is trying to establish a terminal status without a finishedAt
+	// timestamp. Heartbeat-only updates (status='running', no finishedAt) are
+	// allowed if heartbeat has changed (checked separately in hasMeaningfulUpdate).
+	if (!updated.finishedAt && !isNonTerminalTaskStatus(updated.status)) return false;
 	// Explicitly enumerate all fields that constitute a meaningful update so that
 // adding a new important field requires updating this list (rather than silently
 // losing data if a field is forgotten in the boolean OR chain below).
@@ -391,8 +402,14 @@ export async function executeTeamRun(input: ExecuteTeamRunInput): Promise<{ mani
 	} catch (error) {
 		// P1: Catch unhandled errors — ensure manifest/tasks/agents are terminal so they don't stay "running" forever.
 		const message = error instanceof Error ? error.message : String(error);
-		// NOTE: no withRunLock — best-effort only; concurrent writes may cause inconsistency
-		const loaded = loadRunManifestById(input.manifest.cwd, input.manifest.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
+		// Reload manifest with lock to avoid stale data overwriting concurrent writes.
+		// If lock acquisition fails, use in-memory data rather than stale disk data.
+		let loaded;
+		try {
+			loaded = await withRunLock(input.manifest, async () => loadRunManifestById(input.manifest.cwd, input.manifest.runId));
+		} catch {
+			loaded = undefined; // best-effort: use in-memory data if lock fails
+		}
 		const freshManifest = loaded?.manifest ?? manifest;
 		const freshTasks = refreshTaskGraphQueues(loaded?.tasks ?? input.tasks);
 		const failedAt = new Date().toISOString();
@@ -677,9 +694,11 @@ async function executeTeamRunCore(
 // Use updateRunStatus to recompute manifest status from merged tasks rather than
 // relying on the last result's manifest (which is arbitrary due to mapConcurrent
 // returning results in arbitrary order).
-const mergedManifestBase = validResults.at(-1)!.manifest;
+// Use the in-memory manifest as base (not the last-completing worker's snapshot).
+// Recompute status from merged tasks so the manifest reflects actual task state,
+// not the arbitrary order in which mapConcurrent returned results.
 const mergedArtifacts = mergeArtifacts([manifest.artifacts, ...validResults.map((item) => item.manifest.artifacts)].flat());
-manifest = updateRunStatus({ ...mergedManifestBase, artifacts: mergedArtifacts }, "running", "Merged task updates from parallel batch.");
+manifest = updateRunStatus({ ...manifest, artifacts: mergedArtifacts }, "running", "Merged task updates from parallel batch.");
 		tasks = mergeTaskUpdatesPreservingTerminal(tasks, validResults);
 		// Build a synthetic manifest that reflects the merged task state.
 		// The last result's manifest contains stale task state from that worker's

@@ -75,6 +75,20 @@ export function isSymlinkSafePath(filePath: string): boolean {
 			currentPath = dir;
 		}
 
+
+		// Issue 1 fix: verify baseDir itself is not a symlink.
+		// The while loop above walks ancestors but stops when currentPath reaches
+		// root (currentPath === path.dirname(currentPath)). If baseDir is a symlink
+		// and is also the root of the path, it would not be checked. This explicit
+		// check ensures baseDir is verified regardless of where the loop terminates.
+		if (baseDir !== path.dirname(filePath)) {
+			try {
+				const baseDirStat = fs.lstatSync(baseDir);
+				if (baseDirStat.isSymbolicLink()) return false;
+			} catch {
+				// baseDir does not exist yet — that is OK
+			}
+		}
 		// Check if target file itself is a symlink
 		try {
 			const fileStat = fs.lstatSync(filePath);

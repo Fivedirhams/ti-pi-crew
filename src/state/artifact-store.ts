@@ -52,7 +52,7 @@ function shouldCleanup(artifactsRoot: string, markerFile: string, scanGraceMs: n
 
 export function writeCleanupMarker(artifactsRoot: string, markerFile: string): void {
 	fs.mkdirSync(artifactsRoot, { recursive: true });
-	fs.writeFileSync(path.join(artifactsRoot, markerFile), String(nowMs()), "utf-8");
+	atomicWriteFile(path.join(artifactsRoot, markerFile), String(nowMs()));
 }
 
 export function cleanupOldArtifacts(artifactsRoot: string, options: ArtifactCleanupOptions): void {

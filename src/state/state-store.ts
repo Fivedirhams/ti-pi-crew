@@ -209,10 +209,11 @@ export function createRunManifest(params: {
 }
 
 export function saveRunManifest(manifest: TeamRunManifest): void {
-	// FIX: Invalidate cache BEFORE atomic write to prevent stale cache serving
-	// after a crash. If we invalidated after and crashed between write and
-	// invalidation, the stale cache entry (up to MANIFEST_CACHE_TTL_MS old)
-	// could be served by another process.
+	// FIX: Invalidate cache BEFORE atomic write. The order matters for crash
+	// safety: if we invalidated after the write and crashed before invalidation,
+	// the stale cache entry (up to MANIFEST_CACHE_TTL_MS old) could be served.
+	// By invalidating first, the worst case is a cache miss forcing a disk read,
+	// which is always safe.
 	invalidateRunCache(manifest.stateRoot);
 	const manifestPath = path.join(manifest.stateRoot, "manifest.json");
 	atomicWriteJson(manifestPath, manifest);
@@ -441,6 +442,10 @@ export function loadRunManifestById(cwd: string, runId: string): { manifest: Tea
 		} else if (!validateRunManifestPaths(cwd, runId, cached.manifest, stateRoot, tasksPath)) {
 			manifestCache.delete(stateRoot);
 			return undefined;
+			} else if (!fs.existsSync(tasksPath)) {
+			// Tasks file was deleted after cache was populated — do not serve stale cache.
+			manifestCache.delete(stateRoot);
+			return undefined;
 		} else {
 			return { manifest: cached.manifest, tasks: cached.tasks };
 		}
@@ -513,6 +518,10 @@ export async function loadRunManifestByIdAsync(cwd: string, runId: string): Prom
 		} else if (!validateRunManifestPaths(cwd, runId, cached.manifest, stateRoot, tasksPath)) {
 			manifestCache.delete(stateRoot);
 			return undefined;
+			} else if (!fs.existsSync(tasksPath)) {
+				// Tasks file was deleted after cache was populated — do not serve stale cache.
+				manifestCache.delete(stateRoot);
+				return undefined;
 		} else {
 			return { manifest: cached.manifest, tasks: cached.tasks };
 		}

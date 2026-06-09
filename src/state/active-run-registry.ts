@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { DEFAULT_CACHE, DEFAULT_PATHS } from "../config/defaults.ts";
@@ -153,7 +154,7 @@ export function readActiveRunRegistry(maxEntries = DEFAULT_CACHE.manifestMaxEntr
 function atomicWriteBinary(filePath: string, entries: ActiveRunRegistryEntry[]): void {
 	if (!isSymlinkSafePath(filePath)) throw new Error(`Refusing to write binary registry: target is a symlink or inside untrusted directory: ${filePath}`);
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
-	const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+	const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
 	const O_NOFOLLOW = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
 	const fd = fs.openSync(tempPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, 0o600);
 	try {
@@ -188,8 +189,8 @@ function writeEntries(entries: ActiveRunRegistryEntry[]): void {
 	fs.mkdirSync(path.dirname(registryPath()), { recursive: true });
 	// FIX Issues 1 & 2: Write both to temp files first, then rename both atomically.
 	// If either rename fails, neither file is updated — registry stays consistent.
-	const tempJson = `${registryPath()}.${process.pid}.${Date.now()}.tmp`;
-	const tempBin = `${registryBinaryPath()}.${process.pid}.${Date.now()}.tmp`;
+	const tempJson = `${registryPath()}.${crypto.randomUUID()}.tmp`;
+	const tempBin = `${registryBinaryPath()}.${crypto.randomUUID()}.tmp`;
 	let jsonRenamed = false;
 	let binRenamed = false;
 	try {
@@ -212,14 +213,14 @@ function writeEntries(entries: ActiveRunRegistryEntry[]): void {
 			// Binary succeeded, JSON failed — try to recover JSON from temp
 			try { renameWithRetry(tempJson, registryPath()); jsonRenamed = true; } catch { /* recovery failed */ }
 		}
-		// If recovery failed, only delete files that were NOT successfully renamed.
-		// Deleting a successfully renamed file would cause data loss.
-		// Keep whichever registry was successfully written.
+		// FIX Issue 2: Re-check file existence rather than relying solely on flags,
+		// since a failed recovery doesn't always mean the final file is missing.
+		// If final file exists, do NOT delete it — it may be valid from a prior write.
 		try {
-			if (!binRenamed) {
+			if (!binRenamed && fs.existsSync(registryBinaryPath())) {
 				try { fs.rmSync(registryBinaryPath(), { force: true }); } catch { /* best-effort */ }
 			}
-			if (!jsonRenamed) {
+			if (!jsonRenamed && fs.existsSync(registryPath())) {
 				try { fs.rmSync(registryPath(), { force: true }); } catch { /* best-effort */ }
 			}
 			// FIX Issue 1: Ensure temp file cleanup executes even when recovery rename fails.
@@ -235,8 +236,11 @@ function writeEntries(entries: ActiveRunRegistryEntry[]): void {
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "blocked"]);
 
 /**
- * FIX Issue 2: Filter out entries that are no longer active: terminal status, missing manifest,
+ * FIX Issue 1: Filter out entries that are no longer active: terminal status, missing manifest,
  * or symlink-unsafe paths. This prevents unbounded growth and guards against symlink attacks.
+ *
+ * WARNING: This function reads manifest files WITHOUT holding the registry lock (TOCTOU race).
+ * Stale entries are cleaned up on next writeEntries call. Best-effort filtering only.
  */
 function filterAliveEntries(entries: ActiveRunRegistryEntry[]): ActiveRunRegistryEntry[] {
 	return entries.filter((entry) => {
