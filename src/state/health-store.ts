@@ -41,20 +41,17 @@ export class HealthStore {
   loadLatestSnapshot(): HealthSnapshot | null {
     const dir = this.healthDir();
     if (!fs.existsSync(dir)) return null;
-    const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
-    if (files.length === 0) return null;
-    files.sort().reverse();
-    try {
-      return JSON.parse(fs.readFileSync(path.join(dir, files[0]), "utf8"));
-    } catch {
-      return null;
-    }
+    const snapshots = this.loadAllSnapshots();
+    if (snapshots.length === 0) return null;
+    // Sort by timestamp descending (most recent first)
+    snapshots.sort((a, b) => b.timestamp - a.timestamp);
+    return snapshots[0];
   }
 
   loadAllSnapshots(): HealthSnapshot[] {
     const dir = this.healthDir();
     if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir)
+    const snapshots = fs.readdirSync(dir)
       .filter(f => f.endsWith(".json"))
       .map(f => {
         try {
@@ -64,5 +61,8 @@ export class HealthStore {
         }
       })
       .filter(Boolean) as HealthSnapshot[];
+    // Sort by timestamp ascending (oldest first) for consistent ordering
+    snapshots.sort((a, b) => a.timestamp - b.timestamp);
+    return snapshots;
   }
 }
