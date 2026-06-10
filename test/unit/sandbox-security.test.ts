@@ -26,17 +26,17 @@ test("C1: sandbox env is filtered to allow-list (no API key leakage)", () => {
 
 test("C1: sandbox env allows whitelisted vars through", () => {
 	// Set env var BEFORE creating the sandbox, since the sandbox captures env
-	// at construction time.
-	process.env.PI_CREW_TEST_VAR = "should-be-allowed";
+	// at construction time. Use a var already in the sandbox allowlist.
+	process.env.PI_CREW_DEPTH = "3";
 	let sandbox: ReturnType<typeof createWorkflowSandbox>;
 	try {
 		sandbox = createWorkflowSandbox();
 	} finally {
-		delete process.env.PI_CREW_TEST_VAR;
+		delete process.env.PI_CREW_DEPTH;
 	}
 	const result = sandbox!.execute(`
 		const keys = Object.keys(process.env);
-		return keys.includes("PI_CREW_TEST_VAR");
+		return keys.includes("PI_CREW_DEPTH");
 	`) as boolean;
 	assert.equal(result, true, "sandbox should allow PI_CREW_* through");
 });

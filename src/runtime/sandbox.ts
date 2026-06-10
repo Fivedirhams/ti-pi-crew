@@ -21,13 +21,13 @@ const FORBIDDEN_PATTERNS = [
 	// Global escape vectors
 	/\bglobalThis\b/,                 // globalThis reference
 	/\bglobal\b/,                      // global reference (Node.js)
-	// Block constructor chain escape vectors only:
-	//   - `.constructor` (property access on objects/arrays)
-	//   - `.constructor(` (calling the constructor function)
-	// The bare `constructor` keyword (used in class bodies) is safe and
-	// should be allowed for legitimate class declarations.
+	// Block constructor chain escape vectors:
+	//   - `.constructor` followed by `(`, `.`, `;`, or end-of-line/string
+	//   - `[constructor]` or `["constructor"]` bracket access on any value
+	// The bare `constructor` keyword in a class body is safe and allowed.
 	/\.constructor\s*\(/,              // Block obj.constructor() chain calls
-	/\.constructor\s*(?:\.|$)/,       // Block obj.constructor.X or obj.constructor at end
+	/\.constructor\s*(?:\.|$|;|,|\s)/, // Block obj.constructor at end, semicolon, comma, or whitespace
+	/\[\s*['"]?constructor['"]?\s*\]/, // Block ["constructor"] or ['constructor'] or [constructor]
 ] as const;
 
 Object.freeze(FORBIDDEN_PATTERNS);
