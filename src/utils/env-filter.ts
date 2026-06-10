@@ -39,8 +39,12 @@ export function sanitizeEnvSecrets(env: NodeJS.ProcessEnv, options?: SanitizeEnv
 			if (isDangerousGlob(pattern)) {
 				throw new Error(`Allowlist pattern "${pattern}" could match secret env vars. Use a more specific pattern.`);
 			}
-			// Validate non-glob entries don't look like secret keys
-			if (!pattern.endsWith("*") && isSecretKey(pattern)) {
+			// Validate non-glob entries don't look like secret keys — but skip the check
+			// if the key actually exists in env. This allows intentional allowlisting of
+			// known provider keys (MINIMAX_API_KEY, ANTHROPIC_API_KEY, etc.) that are
+			// legitimately needed by child Pi processes, while still catching accidental
+			// additions like "SECRET_TOKEN = ..." in config files.
+			if (!pattern.endsWith("*") && isSecretKey(pattern) && !(pattern in env)) {
 				throw new Error(`Allowlist entry "${pattern}" looks like a secret key. Use a more specific pattern.`);
 			}
 		}
