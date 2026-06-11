@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { logInternalError } from "../utils/internal-error.ts";
 import { sleepSync } from "../utils/sleep.ts";
@@ -74,7 +75,22 @@ export function isSymlinkSafePath(filePath: string): boolean {
 					if (!isAncestor && !realDirNorm.startsWith(realBaseNorm)) return false;
 					const realStat = fs.statSync(realDir);
 					if (!realStat.isDirectory()) return false;
-					if (typeof process.getuid === "function" && realStat.uid !== process.getuid()) return false;
+					// Only check ownership for user-controlled directories.
+					// System directories like /private/var/folders on macOS are owned
+					// by root but are safe to use (the OS manages them). Skip uid check
+					// for directories not owned by the current user only when the real
+					// path is inside a known system temp directory.
+					if (typeof process.getuid === "function" && realStat.uid !== process.getuid()) {
+						const systemTmp = (typeof os.tmpdir === "function" ? os.tmpdir() : "/tmp").toLowerCase();
+						// On macOS, os.tmpdir() returns /var/folders/... which resolves
+						// to /private/var/folders/... — check both forms.
+						let realSystemTmp = systemTmp;
+						try { realSystemTmp = fs.realpathSync(systemTmp).toLowerCase(); } catch { /* ok */ }
+						const realDirLower = realDir.toLowerCase();
+						if (!realDirLower.startsWith(systemTmp) && !realDirLower.startsWith(realSystemTmp)) {
+							return false;
+						}
+					}
 				}
 			} catch (err) {
 				// Directory doesn't exist yet — that's OK, mkdirSync will create it.
