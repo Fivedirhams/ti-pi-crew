@@ -388,12 +388,19 @@ export async function runTeamTask(
 				const now = Date.now();
 				// Skip disk write if throttled (unless forced).
 				if (!force && now - lastHeartbeatPersistedAt < 1000) return;
-				// Write to disk first, then update in-memory.
-				// Disk state is always <= in-memory state, so a crash never produces
-				// a fresher in-memory heartbeat than what's on disk. This prevents the
-				// stale reconciler from seeing a live heartbeat paired with stale task state
-				// (which could cause false zombie detection).
-				tasks = persistSingleTaskUpdate(manifest, tasks, task);
+				try {
+					// Write to disk first, then update in-memory.
+					// Disk state is always <= in-memory state, so a crash never produces
+					// a fresher in-memory heartbeat than what's on disk. This prevents the
+					// stale reconciler from seeing a live heartbeat paired with stale task state
+					// (which could cause false zombie detection).
+					tasks = persistSingleTaskUpdate(manifest, tasks, task);
+				} catch (err) {
+					// Run state may have been deleted by prune/forget/cleanup.
+					// This is not fatal — the run is gone, no point persisting.
+					if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+					throw err;
+				}
 				// Now update in-memory heartbeat so it is always >= persisted state.
 				task = {
 					...task,

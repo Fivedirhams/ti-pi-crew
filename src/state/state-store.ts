@@ -283,13 +283,29 @@ export async function saveRunManifestAsync(manifest: TeamRunManifest): Promise<v
 export function saveRunTasks(manifest: TeamRunManifest, tasks: TeamTaskState[]): void {
 	// FIX: Invalidate cache BEFORE atomic write to prevent stale cache serving.
 	invalidateRunCache(manifest.stateRoot);
+
+	// Guard: if the run state directory has been removed (prune/forget/cleanup),
+	// silently return — there is nothing to persist and the run is gone.
+	try {
+		fs.statSync(manifest.stateRoot);
+	} catch {
+		return;
+	}
+
 	atomicWriteJson(manifest.tasksPath, tasks);
 	// FIX: Re-populate cache with actual mtime/size for manifest and tasks.
 	// Note: We re-read manifest from disk to get its current mtime/size
 	// since we only wrote tasks here.
 	const manifestPath = path.join(manifest.stateRoot, "manifest.json");
-	const manifestStat = fs.statSync(manifestPath);
-	const tasksStat = fs.statSync(manifest.tasksPath);
+	let manifestStat: fs.Stats;
+	let tasksStat: fs.Stats;
+	try {
+		manifestStat = fs.statSync(manifestPath);
+		tasksStat = fs.statSync(manifest.tasksPath);
+	} catch {
+		// Run state disappeared between the guard above and now — give up gracefully.
+		return;
+	}
 	// FIX: If cache was evicted, re-read manifest from disk rather than using
 	// a minimal fallback. A stale minimal manifest with only runId populated
 	// would cause manifest.status to be undefined, breaking status checks.
@@ -301,7 +317,7 @@ export function saveRunTasks(manifest: TeamRunManifest, tasks: TeamTaskState[]):
 	const cached = manifestCache.get(manifest.stateRoot);
 	const manifestEntry = cached?.manifest ?? readJsonFile<TeamRunManifest>(manifestPath);
 	if (!manifestEntry) {
-		throw errors.taskNotFound("manifest", manifest.runId).withContext(`saveRunTasks: manifest not found at ${manifestPath}`);
+		return; // Run deleted between guard and read
 	}
 	// Preserve current status from the manifest parameter if the on-disk
 	// manifest is missing it (could be a partial write).
@@ -330,12 +346,14 @@ export function saveRunTasks(manifest: TeamRunManifest, tasks: TeamTaskState[]):
 function saveRunTasksCoalesced(manifest: TeamRunManifest, tasks: TeamTaskState[]): void {
 	// FIX: Invalidate cache BEFORE atomic write to prevent stale cache serving.
 	invalidateRunCache(manifest.stateRoot);
+	try { fs.statSync(manifest.stateRoot); } catch { return; }
 	atomicWriteJsonCoalesced(manifest.tasksPath, tasks);
 }
 
 export async function saveRunTasksAsync(manifest: TeamRunManifest, tasks: TeamTaskState[]): Promise<void> {
 	// FIX: Invalidate cache BEFORE atomic write to prevent stale cache serving.
 	invalidateRunCache(manifest.stateRoot);
+	try { fs.statSync(manifest.stateRoot); } catch { return; }
 	await atomicWriteJsonAsync(manifest.tasksPath, tasks);
 }
 

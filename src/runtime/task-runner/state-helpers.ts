@@ -63,7 +63,13 @@ export function persistSingleTaskUpdate(manifest: TeamRunManifest, fallbackTasks
 
 				// No concurrent writer — check that our merged result is based on the
 				// same base we observed (no intermediate writer between our load and check)
-				const recheckMtime = fs.statSync(manifest.tasksPath).mtimeMs;
+				let recheckMtime: number;
+				try {
+					recheckMtime = fs.statSync(manifest.tasksPath).mtimeMs;
+				} catch {
+					// Run state deleted (prune/forget) — nothing to persist.
+					return fallbackTasks;
+				}
 				if (recheckMtime !== baseMtime) {
 					baseMtime = recheckMtime;
 					continue retryLoop;

@@ -207,6 +207,8 @@ export function saveCrewAgents(manifest: TeamRunManifest, records: CrewAgentReco
 const TERMINAL_AGENT_STATUSES = new Set(["completed", "failed", "cancelled", "blocked"]);
 
 export function upsertCrewAgent(manifest: TeamRunManifest, record: CrewAgentRecord): void {
+	// Guard: skip if run state has been deleted (prune/forget/cleanup)
+	try { fs.statSync(manifest.stateRoot); } catch { return; }
 	// Read current state
 	const existing = readCrewAgents(manifest);
 	// Deduplicate by id: keep newer record when same id appears
