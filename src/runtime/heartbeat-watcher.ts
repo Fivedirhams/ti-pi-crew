@@ -112,7 +112,24 @@ export class HeartbeatWatcher {
 						}
 					}
 				}
-				const level = elapsed > thresholds.deadMs ? "dead" : elapsed > thresholds.staleMs ? "stale" : elapsed > thresholds.warnMs ? "warn" : "healthy";
+				// PID liveness gate: if the worker process is still alive, downgrade
+				// "dead" to "stale". This prevents false positives when the LLM spends
+				// a long time generating a response (>5 min) without tool calls.
+				// A truly dead process will eventually be detected by exit handlers.
+				let isProcessAlive = false;
+				const workerPid = task.heartbeat?.pid;
+				if (workerPid && workerPid > 0) {
+					try {
+						process.kill(workerPid, 0);
+						isProcessAlive = true;
+					} catch {
+						// Process is dead
+					}
+				}
+				let level: HeartbeatLevel = elapsed > thresholds.deadMs ? "dead" : elapsed > thresholds.staleMs ? "stale" : elapsed > thresholds.warnMs ? "warn" : "healthy";
+				if (level === "dead" && isProcessAlive) {
+					level = "stale";
+				}
 				this.opts.registry.gauge("crew.heartbeat.staleness_ms", "Heartbeat elapsed since last seen, milliseconds").set({ runId: run.runId, taskId: task.id }, Number.isFinite(elapsed) ? elapsed : thresholds.deadMs);
 				this.opts.registry.counter("crew.heartbeat.level_total", "Heartbeat classifications by level").inc({ runId: run.runId, level });
 				const previous = this.lastLevel.get(key);

@@ -77,7 +77,7 @@ export function applyUsageToProgress(progress: CrewAgentProgress | undefined, us
 
 export function shouldFlushProgressEvent(event: unknown): boolean {
 	const type = asRecord(event)?.type;
-	return type === "tool_execution_start" || type === "tool_execution_end" || type === "message_end" || type === "tool_result_end";
+	return type === "tool_execution_start" || type === "tool_execution_end" || type === "message_start" || type === "message_end" || type === "tool_result_end";
 }
 
 export function progressEventSummary(task: TeamTaskState, event: unknown): ProgressEventSummary {
