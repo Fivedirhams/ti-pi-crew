@@ -351,8 +351,9 @@ export function prepareTaskWorkspace(manifest: TeamRunManifest, task: TeamTaskSt
 		// We must compare against the path part (after "worktree ").
 		// On Windows, git may return forward-slash long-name paths while
 		// worktreePath uses short-name backslash form. Resolve both through
-		// realpathSync for consistent form, then normalize separators.
-		const normalizedWtPath = process.platform === "win32" ? (() => { try { return fs.realpathSync(worktreePath); } catch { return worktreePath; } })().replace(/\\/g, "/").toLowerCase() : worktreePath;
+		// realpathSync.native (which always returns long-name on Windows)
+		// for consistent comparison.
+		const normalizedWtPath = process.platform === "win32" ? (() => { try { const r = fs.realpathSync.native(worktreePath); return r.startsWith("\\\\?\\") ? r.slice(4) : r; } catch { return worktreePath; } })().replace(/\\/g, "/").toLowerCase() : worktreePath;
 		worktreeExists = worktreeList.split("\n").some((line) => {
 			const trimmed = line.trim();
 			const matchPath = trimmed.startsWith("worktree ") ? trimmed.slice(9) : trimmed;
