@@ -13,12 +13,16 @@ repo: https://github.com/baphuongna/pi-crew
 
 ### Highlights (v0.6.2 → v0.6.3)
 
-- **84 commits** since v0.6.1 — 180 files changed (+16,312 / −1,929 lines)
+- **137 commits** since v0.6.1 — 200 files changed (+16,955 / −2,057 lines)
 - **4,792 tests**, 506 test files — **0 failures** across the entire suite
+- **Cross-platform CI green** — 0 failures on Ubuntu, macOS, and Windows
 - **366 source files**, ~70K lines of TypeScript
+- **Worktree precondition validation** — friendly errors instead of crashes when cwd is not a git repo or repo is dirty
+- **Cross-platform path handling** — `canonicalizePath` with `realpathSync.native` for Windows short-name/long-name aliasing; macOS symlink resolution
 - **Scheduled job lifecycle** — spawned runs are tracked, cancelling a job kills its runs
 - **Heartbeat false-positive fix** — PID liveness gate prevents dead detection during long LLM responses
 - **ENOENT crash fix** — prune/forget race no longer crashes pi when persisting to deleted runs
+- **Pipe buffer deadlock fix** — test runner no longer deadlocks when OS pipe buffer fills
 - **Plugin registry** — extensible framework context injection for Next.js, Vite, Vitest
 - **Health score system** — penalty-based scoring with time-series snapshots
 - **CrewError taxonomy** — E001–E006 structured error codes replacing raw throws
@@ -121,13 +125,13 @@ When unsure which team/workflow fits:
 
 ## Builtin Teams
 
-| Team | Workflow | Mục đích |
+| Team | Workflow | Purpose |
 |------|----------|----------|
-| `default` | explore → plan → execute → verify | Cân bằng, đa năng |
-| `fast-fix` | explore → execute → verify | Sửa bug nhỏ nhanh |
-| `implementation` | Adaptive planner quyết fanout | Multi-file implementation |
+| `default` | explore → plan → execute → verify | Balanced, general-purpose |
+| `fast-fix` | explore → execute → verify | Quick bug fixes |
+| `implementation` | Adaptive planner decides fanout | Multi-file implementation |
 | `review` | explore → code-review → security-review → verify | Code review + security audit |
-| `research` | explore → analyze → write | Nghiên cứu và viết tài liệu |
+| `research` | explore → analyze → write | Research and documentation |
 | `parallel-research` | Parallel shards → synthesize → write | Multi-source research |
 
 ## Builtin Agents
@@ -181,7 +185,7 @@ Worktree mode creates an **isolated git worktree per task** — safe for paralle
   "action": "run",
   "team": "implementation",
   "goal": "Refactor auth",
-  "worktree": { "enabled": true }
+  "workspaceMode": "worktree"
 }
 ```
 
@@ -190,9 +194,12 @@ Worktree mode creates an **isolated git worktree per task** — safe for paralle
 ```
 
 Requirements:
-- Git repository
-- Clean working tree (no uncommitted changes in the main worktree)
+- Git repository (cwd must be inside a git repo)
+- Clean working tree (no uncommitted changes in the leader worktree)
+  - Can be disabled via config: `requireCleanWorktreeLeader: false`
 - Worktrees auto-cleanup on run completion/cancel
+
+If preconditions are not met, a friendly error message is returned instead of crashing.
 
 ---
 
@@ -417,7 +424,7 @@ npm run ci           # full CI-equivalent check
 npm pack --dry-run   # package verification
 ```
 
-Stats: **366 source files** (70K lines) · **506 test files** (66K lines) · **4,792 tests, 0 failures**
+Stats: **366 source files** (70K lines) · **506 test files** (66K lines) · **4,792 tests, 0 failures** · **CI: Ubuntu ✅ macOS ✅ Windows ✅**
 
 ---
 

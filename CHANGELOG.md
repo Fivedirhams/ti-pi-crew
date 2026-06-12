@@ -1,14 +1,19 @@
 # Changelog
 
-## [0.6.3] — Pre-Publish Review: 87 Test Fixes, Heartbeat Fix, ENOENT Crash Fix, Scheduler Lifecycle (2026-06-11)
+## [0.6.3] — Cross-Platform CI, 87 Test Fixes, Worktree Validation, Heartbeat & Crash Fixes (2026-06-12)
 
 ### Highlights
+- **Cross-platform CI green** — 0 failures across Ubuntu, macOS, and Windows (4,725 unit + 113 integration tests)
 - **87 pre-existing test failures resolved** — 0 failures across 4,792 tests in 506 test files
 - **Heartbeat false-positive dead detection fixed** — `message_start` added to progress flush events; PID liveness gate uses `task.checkpoint.childPid` fallback
 - **ENOENT crash on prune/forget race fixed** — 4-layer defense in `persistSingleTaskUpdate`, `persistHeartbeat`, `saveRunTasks`, and `upsertCrewAgent`
 - **Scheduled job lifecycle completed** — spawned runs tracked via `spawnedRunIds[]`, auto-cancelled on job removal, manifests stamped with `schedulerJobId` for traceability
+- **Worktree precondition validation** — friendly error messages instead of crashes when cwd is not a git repo or repo has uncommitted changes
+- **Cross-platform path handling** — `canonicalizePath` with `realpathSync.native` for Windows short-name/long-name aliasing; macOS `/var` → `/private/var` symlink resolution
+- **Pipe buffer deadlock fix** — `spawnSync` with `stdio: 'pipe'` caused deadlock when OS pipe buffer (~64KB) filled at ~227 tests; switched to `stdio: 'inherit'`
+- **Stale lock recovery** — removed `readLockToken` guard so stale locks without 'token' field are properly deleted
+- **Full-feature smoke test** — 58 integration tests covering all pi-crew actions
 - **Pre-push review**: 56 unpushed commits reviewed (116 files, +9,599/−980 lines), 1 release blocker found and fixed
-- **Full-feature smoke test**: 58 integration tests covering all pi-crew actions
 
 ### Bug Fixes
 - **`89ed975`** — Heartbeat watcher: added `message_start` to `shouldFlushProgressEvent()` so LLM stream start updates `lastActivityAt`. Previously, an 8m53s LLM response (365 file reads, no tool calls) triggered false `heartbeat_dead` at 300s threshold.
@@ -19,6 +24,15 @@
 - **`dd279bc`** — EBADF (missing O_WRONLY flag), re-entrant sync locks, worktree list parsing, env-filter provider keys.
 - **`38b8f5a`** — Create `transcripts/` directory before child-pi appends.
 - **`d893434`** — Child-pi: remove API key allowlist; child Pi uses same config as parent.
+- **`5cb9122`** — Cross-platform: `canonicalizePath` in `paths.ts` uses `realpathSync.native` for consistent long-name paths on Windows; all test temp dirs canonicalized through `.native`.
+- **`3b46556`** — Cross-platform: `resolvedWorktreeRoot` uses `.native` for git worktree compatibility on Windows; worktree list comparison normalizes through `.native`.
+- **`b2b7068`** — Worktree: precondition validation in `team-tool/run.ts` checks git repo existence and clean leader status before creating run manifest, returning friendly error messages instead of crashing.
+- **`8090fe2`** — Worktree: respect `requireCleanWorktreeLeader` config setting in precondition check.
+- **`2014739`** — Pipe buffer deadlock: `spawnSync` with `stdio: 'pipe'` caused deadlock when OS pipe buffer (~64KB) filled at ~227 tests; switched to `stdio: 'inherit'`.
+- **`d6920bf`** — Stale lock recovery: removed `readLockToken` guard so stale locks without 'token' field are properly deleted.
+- **`3897c1d`** — Mailbox: return paths as-is from `safeMailboxDir`, `safeMailboxFile`, `safeMailboxTasksRoot`, `taskMailboxDir` instead of re-resolving through `resolveRealContainedPath` which changed path forms on Windows.
+- **`f867d4d`** — macOS: `realpathSync(os.tmpdir())` in 3 test files to handle `/var` → `/private/var` symlink.
+- **`2fd0c1e`** — TypeScript: fix Property 'text' and Property 'taskId'→'id' errors for strict compiler checks.
 
 ### Test Fixes (87 total)
 - **`1ab7926`** — 33 failures: state-store mtime CAS, locks race, discovery, atomic-write, config-schema, blob-store, env-filter, sandbox, security-hardening, worktree
@@ -39,11 +53,12 @@
 - **`ff3da92`** — Health snapshot saved on run completion.
 
 ### Stats
-- 84 commits since v0.6.1
-- 180 files changed (+16,312 / −1,929 lines)
+- 137 commits since v0.6.1
+- 200 files changed (+16,955 / −2,057 lines)
 - 366 source files, ~70K lines TypeScript
 - 506 test files, ~66K lines TypeScript
 - 4,792 tests, 0 failures
+- CI: Ubuntu ✅ macOS ✅ Windows ✅ (0 failures each)
 
 
 ## [0.6.3] — Post-Release Hardening: Cleanup, Safe-Paths, State-Store Race (2026-06-08)
