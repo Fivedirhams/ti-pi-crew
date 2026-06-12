@@ -9,6 +9,7 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import type { CrewTheme } from "../theme-adapter.ts";
 import { truncLine, formatTokens, formatDuration } from "../tool-render.ts";
 import type { CrewAgentRecord } from "../../runtime/crew-agent-runtime.ts";
+import { isBrief, briefToolResult } from "./brief-mode.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -57,6 +58,11 @@ export const teamToolRenderer: ToolRenderer = {
 		const action = typeof d.action === "string" ? d.action : "";
 		const status = typeof d.status === "string" ? d.status : "";
 		const runId = typeof d.runId === "string" ? d.runId : "";
+
+		// Brief mode: one-line compact summary
+		if (isBrief() && !ctx.expanded) {
+			return new Text(briefToolResult("team", result as { content?: unknown[] }, theme), 0, 0);
+		}
 
 		// Compact: one-line summary
 		if (!ctx.expanded) {
@@ -108,6 +114,11 @@ export const agentToolRenderer: ToolRenderer = {
 		const d = (result.details ?? result) as Record<string, unknown>;
 		const results = d.results as Array<Record<string, unknown>> | undefined;
 		const w = ctx.width ?? 116;
+
+		// Brief mode: one-line compact summary
+		if (isBrief() && !ctx.expanded) {
+			return new Text(briefToolResult("agent", result as { content?: unknown[] }, theme), 0, 0);
+		}
 
 		if (results?.length) {
 			const c = new Container();
