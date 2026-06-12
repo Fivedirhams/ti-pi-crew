@@ -309,13 +309,24 @@ export function resolveRealContainedPath(baseDir: string, targetPath: string): s
 	}
 
 	// Verify the resolved real path is still within baseDir.
-	// On Windows, paths are case-insensitive but path.relative does case-sensitive
-	// string compare. Normalize case so paths differing only in case (e.g. C:\Users\RUNNER~1
-	// vs C:\Users\runneradmin) are treated as the same directory.
-	const baseCompare = process.platform === "win32" ? realBase.toLowerCase() : realBase;
-	const targetCompare = process.platform === "win32" ? realTarget.toLowerCase() : realTarget;
+	// Verify the resolved real path is still within baseDir.
+	// On Windows, short-name (RUNNER~1) and long-name (runneradmin) aliases
+	// can cause false negatives. Use realpathSync.native on both paths
+	// and strip \\?\ prefix for consistent comparison.
+	let compareBase = realBase;
+	let compareTarget = realTarget;
+	if (process.platform === "win32") {
+		try {
+			const rb = fs.realpathSync.native(realBase);
+			compareBase = rb.startsWith("\\\\?\\") ? rb.slice(4) : rb;
+			const rt = fs.realpathSync.native(realTarget);
+			compareTarget = rt.startsWith("\\\\?\\") ? rt.slice(4) : rt;
+		} catch { /* fallback to case-insensitive compare */ }
+		compareBase = compareBase.toLowerCase();
+		compareTarget = compareTarget.toLowerCase();
+	}
 	const relative = process.platform === "win32"
-		? path.relative(baseCompare, targetCompare)
+		? path.relative(compareBase, compareTarget)
 		: path.relative(realBase, realTarget);
 	if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Path is outside ${baseDir}: ${targetPath}`);
 	return realTarget;
