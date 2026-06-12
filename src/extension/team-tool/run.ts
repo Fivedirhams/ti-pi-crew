@@ -341,7 +341,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 			}
 
 			const runFailed = completed.manifest.status === "failed" || completed.manifest.status === "blocked";
-			return result(lines.join("\n"), { action: "run", status: runFailed ? "error" : "ok", runId: completed.manifest.runId, artifactsRoot: completed.manifest.artifactsRoot }, runFailed);
+			return result(lines.join("\n"), { action: "run", status: runFailed ? "error" : "ok", runId: completed.manifest.runId, artifactsRoot: completed.manifest.artifactsRoot, metrics }, runFailed);
 		} catch (waitError: unknown) {
 			const errorMessage = waitError instanceof Error ? waitError.message : String(waitError);
 			return result(
@@ -474,7 +474,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 			}
 
 			const runFailed = completed.manifest.status === "failed" || completed.manifest.status === "blocked";
-			return result(lines.join("\n"), { action: "run", status: runFailed ? "error" : "ok", runId: completed.manifest.runId, artifactsRoot: completed.manifest.artifactsRoot }, runFailed);
+			return result(lines.join("\n"), { action: "run", status: runFailed ? "error" : "ok", runId: completed.manifest.runId, artifactsRoot: completed.manifest.artifactsRoot, metrics }, runFailed);
 		} catch (waitError: unknown) {
 			const errorMessage = waitError instanceof Error ? waitError.message : String(waitError);
 			return result(
@@ -514,5 +514,5 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 				? "Experimental live-session worker execution was enabled."
 				: "Safe scaffold mode: child Pi workers were not launched because runtime.mode=scaffold or executeWorkers=false was configured.",
 	].join("\n");
-	return result(text, { action: "run", status: executed.manifest.status === "failed" ? "error" : "ok", runId: executed.manifest.runId, artifactsRoot: executed.manifest.artifactsRoot }, executed.manifest.status === "failed");
+	return result(text, { action: "run", status: executed.manifest.status === "failed" ? "error" : "ok", runId: executed.manifest.runId, artifactsRoot: executed.manifest.artifactsRoot, metrics: collectRunMetrics(resolvedCtx.cwd, executed.manifest.runId) }, executed.manifest.status === "failed");
 }

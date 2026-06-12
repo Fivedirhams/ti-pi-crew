@@ -66,13 +66,20 @@ export const teamToolRenderer: ToolRenderer = {
 
 		// Compact: one-line summary
 		if (!ctx.expanded) {
-			if (action === "run" && records?.length) {
-				return renderCompactRunSummary(records, theme);
-			}
 			if (action === "run") {
-				const goal = typeof d.goal === "string" ? d.goal : "";
+				const m = d.metrics as { taskCount?: number; completedCount?: number; totalTokens?: number; totalCost?: number; durationMs?: number } | undefined;
+				if (m) {
+					const icon = m.completedCount === m.taskCount ? theme.fg("success", "✓") : m.completedCount && m.taskCount && m.completedCount < m.taskCount ? theme.fg("warning", "⟳") : statusIcon(status, theme);
+					const parts: string[] = [];
+					if (m.completedCount != null && m.taskCount) parts.push(`${m.completedCount}/${m.taskCount} tasks`);
+					if (m.durationMs) parts.push(formatDuration(m.durationMs));
+					if (m.totalTokens) parts.push(`${formatTokens(m.totalTokens)} tok`);
+					if (m.totalCost) parts.push(`$${m.totalCost.toFixed(3)}`);
+					return new Text(`${icon} ${parts.join(" · ")}`, 0, 0);
+				}
+				// Fallback: status + runId
 				const icon = statusIcon(status, theme);
-				return new Text(`${icon} ${theme.fg("text", truncLine(goal, 100))}`, 0, 0);
+				return new Text(`${icon} ${status}${runId ? " · " + runId.slice(-8) : ""}`, 0, 0);
 			}
 			const parts: string[] = [];
 			if (status) parts.push(`status=${status}`);
@@ -89,6 +96,18 @@ export const teamToolRenderer: ToolRenderer = {
 				c.addChild(renderAgentRow(r, theme, ctx.width ?? 116));
 			}
 			return c;
+		}
+
+		// Expanded: metrics summary when no agent records
+		if (action === "run") {
+			const m = d.metrics as { taskCount?: number; completedCount?: number; totalTokens?: number; totalCost?: number; durationMs?: number } | undefined;
+			if (m) {
+				const c = new Container();
+				const icon = m.completedCount === m.taskCount ? theme.fg("success", "✓") : theme.fg("warning", "⟳");
+				c.addChild(new Text(`${icon} ${m.completedCount}/${m.taskCount} tasks · ${formatDuration(m.durationMs ?? 0)} · ${formatTokens(m.totalTokens ?? 0)} tok`, 0, 0));
+				if (runId) c.addChild(new Text(theme.fg("dim", `runId: ${runId}`), 0, 0));
+				return c;
+			}
 		}
 
 		// Fallback: content text
