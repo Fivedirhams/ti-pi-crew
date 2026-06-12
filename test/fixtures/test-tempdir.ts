@@ -21,10 +21,7 @@ export function createTrackedTempDir(prefix: string): string {
 	// On macOS, os.tmpdir() may return a symlinked path (e.g. /var/folders/.../T/)
 	// that atomicWriteFile refuses to write through. Resolve to the real path.
 	const realTmp = fs.realpathSync(os.tmpdir());
-	let dir = fs.mkdtempSync(path.join(realTmp, prefix));
-	// On Windows, mkdtempSync may still return a short-name (8.3) path.
-	// Resolve again to get the canonical long-name form.
-	try { dir = fs.realpathSync.native(dir); if (dir.startsWith("\\\\?\\")) dir = dir.slice(4); } catch { /* keep as-is */ }
+	const dir = fs.mkdtempSync(path.join(realTmp, prefix));
 	tracked.add(dir);
 	return dir;
 }

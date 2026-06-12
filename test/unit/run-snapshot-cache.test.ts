@@ -12,15 +12,11 @@ import { createRunSnapshotCache } from "../../src/ui/run-snapshot-cache.ts";
 
 function tempCwd(prefix: string): string {
 	let cwd = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-	// On Windows, use .native to get long-name path and strip \\?\ prefix.
-	// This prevents short-name (RUNNER~1) vs long-name (runneradmin) mismatch
-	// when safe-paths.ts uses realpathSync.native internally.
-	try {
-		const resolved = fs.realpathSync.native(cwd);
-		cwd = resolved.startsWith("\\\\?\\") ? resolved.slice(4) : resolved;
-	} catch {
-		try { cwd = fs.realpathSync(cwd); } catch { /* keep as-is */ }
-	}
+	// On macOS, resolve /var → /private/var symlink.
+	// On Windows, do NOT use realpathSync.native — it returns long-name paths
+	// (runneradmin) that differ from os.tmpdir()'s short-name form (RUNNER~1),
+	// causing containment check failures in resolveRealContainedPath.
+	try { cwd = fs.realpathSync(cwd); } catch { /* keep as-is */ }
 	fs.mkdirSync(path.join(cwd, ".crew"), { recursive: true });
 	return cwd;
 }
