@@ -27,10 +27,18 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { projectCrewRoot } from "../../src/utils/paths.ts";
 
+/** Canonicalize dir to long-name form on Windows via realpathSync.native */
+function canonicalizeDir(dir: string): string {
+	try {
+		const r = fs.realpathSync.native(dir);
+		return r.startsWith("\\\\?\\") ? r.slice(4) : r;
+	} catch { try { return fs.realpathSync(dir); } catch { return dir; } }
+}
+
 /** Make a temp dir that mimics a .pi-based project (no .crew/). */
 function makePiProject(): string {
 	let dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-issue-29-"));
-	try { dir = fs.realpathSync(dir); } catch { /* keep as-is */ }
+	dir = canonicalizeDir(dir);
 	fs.mkdirSync(path.join(dir, ".pi"), { recursive: true });
 	return dir;
 }
@@ -38,7 +46,7 @@ function makePiProject(): string {
 /** Make a temp dir that mimics a .crew-based project (no .pi/). */
 function makeCrewProject(): string {
 	let dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-issue-29-"));
-	try { dir = fs.realpathSync(dir); } catch { /* keep as-is */ }
+	dir = canonicalizeDir(dir);
 	fs.mkdirSync(path.join(dir, ".crew"), { recursive: true });
 	return dir;
 }
@@ -72,8 +80,7 @@ test("issue #29 — projectCrewRoot returns .crew/ when .crew/ exists (precedenc
 });
 
 test("issue #29 — projectCrewRoot returns .pi/teams/ when both .pi/ and .crew/ exist (existing .crew wins)", () => {
-	let dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-issue-29-"));
-	try { dir = fs.realpathSync(dir); } catch { /* keep as-is */ }
+	let dir = canonicalizeDir(fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-issue-29-")));
 	fs.mkdirSync(path.join(dir, ".pi"), { recursive: true });
 	fs.mkdirSync(path.join(dir, ".crew"), { recursive: true });
 	try {

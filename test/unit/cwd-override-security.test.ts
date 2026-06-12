@@ -21,8 +21,13 @@ test("resolveCwdOverride rejects directories outside the base cwd", () => {
 });
 
 test("resolveCwdOverride allows contained child directories", () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-cwd-"));
+	let root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-cwd-"));
 	try {
+		// Canonicalize to long-name form matching production code (projectCrewRoot uses .native)
+		try {
+			const r = fs.realpathSync.native(root);
+			root = r.startsWith("\\\\?\\") ? r.slice(4) : r;
+		} catch { /* keep as-is */ }
 		const child = path.join(root, "child");
 		fs.mkdirSync(child, { recursive: true });
 		const result = resolveCwdOverride(root, "child");

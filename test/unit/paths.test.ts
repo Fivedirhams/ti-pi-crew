@@ -19,8 +19,11 @@ import { findRepoRoot, projectPiRoot, projectCrewRoot, userPiRoot, packageRoot, 
 
 const makeTempDir = () => {
 	let dir = fs.mkdtempSync(path.join(os.tmpdir(), "paths-test-"));
-	// Resolve symlinks (macOS /var → /private/var) so assertions match findRepoRoot's realpath behavior
-	try { dir = fs.realpathSync(dir); } catch { /* keep as-is */ }
+	// Canonicalize to long-name form matching production code (projectCrewRoot uses .native)
+	try {
+		const r = fs.realpathSync.native(dir);
+		dir = r.startsWith("\\\\?\\") ? r.slice(4) : r;
+	} catch { try { dir = fs.realpathSync(dir); } catch { /* keep as-is */ } }
 	return dir;
 };
 

@@ -11,7 +11,12 @@ const workflow = { name: "w", description: "", source: "test", filePath: "w", st
 const agent = { name: "a", description: "", source: "test", filePath: "a", systemPrompt: "test" } as const;
 
 test("runTeamTask refreshes worker heartbeat while child JSON events stream", async () => {
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-task-heartbeat-"));
+	let cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-task-heartbeat-"));
+	// Canonicalize to long-name form matching production code
+	try {
+		const r = fs.realpathSync.native(cwd);
+		cwd = r.startsWith("\\\\?\\") ? r.slice(4) : r;
+	} catch { /* keep as-is */ }
 	const previousMock = process.env.PI_TEAMS_MOCK_CHILD_PI;
 	process.env.PI_CREW_ALLOW_MOCK = "1";
 	process.env.PI_TEAMS_MOCK_CHILD_PI = "json-success";

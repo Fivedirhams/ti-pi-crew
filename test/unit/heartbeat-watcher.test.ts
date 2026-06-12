@@ -12,8 +12,13 @@ const team = { name: "t", description: "", source: "test", filePath: "t", roles:
 const workflow = { name: "w", description: "", source: "test", filePath: "w", steps: [{ id: "s", role: "r", task: "x" }] } as never;
 
 test("HeartbeatWatcher emits dead notification once and triggers deadletter threshold", () => {
-	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-heartbeat-watcher-"));
+	let cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-heartbeat-watcher-"));
 	try {
+		// Canonicalize to long-name form matching production code
+		try {
+			const r = fs.realpathSync.native(cwd);
+			cwd = r.startsWith("\\\\?\\") ? r.slice(4) : r;
+		} catch { /* keep as-is */ }
 		fs.writeFileSync(path.join(cwd, "package.json"), "{}", "utf-8");
 		const created = createRunManifest({ cwd, team, workflow, goal: "hb" });
 		const manifest = updateRunStatus(created.manifest, "running", "running");
