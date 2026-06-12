@@ -100,6 +100,7 @@ import {
 import { createJsonlSink, type NotificationSink } from "./notification-sink.ts";
 import { runArtifactCleanup } from "./registration/artifact-cleanup.ts";
 import { registerTeamCommands } from "./registration/commands.ts";
+import { registerBriefToolOverrides } from "./registration/brief-tool-overrides.ts";
 import { registerCompactionGuard } from "./registration/compaction-guard.ts";
 import {
 	__test__subagentSpawnParams,
@@ -1984,6 +1985,10 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 	time("register.tools");
 
 	registerCleanupHandler(pi);
+
+	// Brief tool overrides — re-register built-in tools (read, bash, edit, write, find, grep, ls)
+	// with themed renderCall/renderResult and brief-mode compact display.
+	registerBriefToolOverrides(pi, process.cwd());
 
 	registerTeamCommands(pi, {
 		startForegroundRun,
