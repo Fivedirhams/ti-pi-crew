@@ -48,12 +48,14 @@ function trimLine(value: string): string {
 
 function taskCounts(tasks: TeamTaskState[] | undefined): string | undefined {
 	if (!tasks || tasks.length === 0) return undefined;
+	const total = tasks.length;
+	const completed = tasks.filter((t) => t.status === "completed").length;
 	const buckets = new Map<string, number>();
 	for (const task of tasks) buckets.set(task.status, (buckets.get(task.status) ?? 0) + 1);
 	const summary = [...buckets.entries()]
 		.map(([status, count]) => `${status}=${count}`)
 		.join(" ");
-	return `tasks ${summary}`;
+	return `tasks ${completed}/${total} done ${summary}`;
 }
 
 /**

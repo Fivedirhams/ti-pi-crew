@@ -469,10 +469,11 @@ function appendExpandedMetrics(lines: string[], m: Metrics | undefined, status: 
 
 function extractContentText(content: unknown): string {
 	if (!Array.isArray(content)) return typeof content === "string" ? content : "";
-	return content
-		.filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null && (c as Record<string, unknown>).type === "text")
-		.map((c) => String((c as Record<string, unknown>).text ?? ""))
-		.join("\n");
+	// onUpdate appends text blocks — only use the LAST one to avoid stacking
+	const texts = content
+		.filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null && (c as Record<string, unknown>).type === "text");
+	if (texts.length === 0) return "";
+	return String((texts[texts.length - 1]! as Record<string, unknown>).text ?? "");
 }
 
 /** Parse streaming progress text from team-tool progress binder. */
