@@ -19,6 +19,8 @@ export interface ToolRenderContext {
 	expanded: boolean;
 	lastComponent?: Container;
 	width?: number;
+	isPartial?: boolean;
+	isError?: boolean;
 }
 
 export interface ToolRenderer {
@@ -116,6 +118,42 @@ function buildFrame(contentLines: string[], totalWidth: number, theme: CrewTheme
 	return lines.join("\n");
 }
 
+/** Build frame TOP: top border + content lines, NO bottom border.
+ *  Pairs with buildFrameBottom() so renderCall + renderResult merge into ONE frame. */
+function buildFrameTop(contentLines: string[], totalWidth: number, theme: CrewTheme, borderSlot: "success" | "error" | "border" | "borderAccent" = "border"): string {
+	const frameW = totalWidth - 2;
+	const innerW = frameW - 2;
+	const top = theme.fg(borderSlot, `╭${"─".repeat(innerW)}╮`);
+	const v = theme.fg(borderSlot, "│");
+	const lines: string[] = [top];
+	for (const line of contentLines) {
+		lines.push(v + padVisual(line, innerW) + v);
+	}
+	return lines.join("\n");
+}
+
+/** Build frame BOTTOM: content lines + bottom border, NO top border.
+ *  Pairs with buildFrameTop() so renderCall + renderResult merge into ONE frame. */
+function buildFrameBottom(contentLines: string[], totalWidth: number, theme: CrewTheme, borderSlot: "success" | "error" | "border" | "borderAccent" = "border"): string {
+	const frameW = totalWidth - 2;
+	const innerW = frameW - 2;
+	const v = theme.fg(borderSlot, "│");
+	const bottom = theme.fg(borderSlot, `╰${"─".repeat(innerW)}╯`);
+	const lines: string[] = [];
+	for (const line of contentLines) {
+		lines.push(v + padVisual(line, innerW) + v);
+	}
+	lines.push(bottom);
+	return lines.join("\n");
+}
+
+/** Derive border color from context so renderCall's top matches renderResult's bottom. */
+function borderFromContext(ctx: ToolRenderContext): "success" | "error" | "borderAccent" {
+	if (ctx.isPartial) return "borderAccent";
+	if (ctx.isError) return "error";
+	return "success";
+}
+
 // ── Team Tool Renderer ─────────────────────────────────────────────────
 
 export const teamToolRenderer: ToolRenderer = {
@@ -142,7 +180,7 @@ export const teamToolRenderer: ToolRenderer = {
 			contentLines.push(padVisual(` ${theme.fg("dim", previewText)}`, innerW));
 		}
 
-		return new Text(buildFrame(contentLines, w, theme, "borderAccent"), 0, 0);
+		return new Text(buildFrameTop(contentLines, w, theme, borderFromContext(ctx)), 0, 0);
 	},
 
 	renderResult(result, _options, theme, ctx) {
@@ -200,7 +238,7 @@ function renderTeamResult(result: Record<string, unknown>, options: unknown, the
 		}
 
 		if (contentLines.length > 0) {
-			return buildFrame(contentLines, w, theme, "borderAccent");
+			return buildFrameBottom(contentLines, w, theme, "borderAccent");
 		}
 	}
 
@@ -209,7 +247,7 @@ function renderTeamResult(result: Record<string, unknown>, options: unknown, the
 	if (isBrief() && !ctx.expanded && action !== "run") {
 		const briefText = briefToolResult("team", result as { content?: unknown[] }, theme);
 		contentLines.push(padVisual(` ${briefText}`, innerW));
-		return buildFrame(contentLines, w, theme, bColor);
+		return buildFrameBottom(contentLines, w, theme, bColor);
 	}
 
 	if (!ctx.expanded) {
@@ -239,7 +277,7 @@ function renderTeamResult(result: Record<string, unknown>, options: unknown, the
 		}
 	}
 
-	return buildFrame(contentLines, w, theme, bColor);
+	return buildFrameBottom(contentLines, w, theme, bColor);
 }
 
 // ── Agent Tool Renderer ────────────────────────────────────────────────
@@ -263,7 +301,7 @@ export const agentToolRenderer: ToolRenderer = {
 			contentLines.push(padVisual(` ${theme.fg("dim", previewText)}`, innerW));
 		}
 
-		return new Text(buildFrame(contentLines, w, theme, "borderAccent"), 0, 0);
+		return new Text(buildFrameTop(contentLines, w, theme, borderFromContext(ctx)), 0, 0);
 	},
 
 	renderResult(result, _options, theme, ctx) {
@@ -292,14 +330,14 @@ function renderAgentResult(result: Record<string, unknown>, options: unknown, th
 		const spinner = theme.fg("warning", "◉");
 		const label = theme.fg("muted", "agent working...");
 		contentLines.push(padVisual(` ${spinner} ${label}`, innerW));
-		return buildFrame(contentLines, w, theme, "borderAccent");
+		return buildFrameBottom(contentLines, w, theme, "borderAccent");
 	}
 
 	// Brief mode: non-agent results get brief treatment
 	if (!results?.length && !d.agentId) {
 		const briefText = briefToolResult("agent", result as { content?: unknown[] }, theme);
 		contentLines.push(padVisual(` ${briefText}`, innerW));
-		return buildFrame(contentLines, w, theme, bColor);
+		return buildFrameBottom(contentLines, w, theme, bColor);
 	}
 
 	if (!ctx.expanded) {
@@ -353,7 +391,7 @@ function renderAgentResult(result: Record<string, unknown>, options: unknown, th
 		}
 	}
 
-	return buildFrame(contentLines, w, theme, bColor);
+	return buildFrameBottom(contentLines, w, theme, bColor);
 }
 
 // ── Card builders ──────────────────────────────────────────────────────
