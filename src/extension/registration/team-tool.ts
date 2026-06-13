@@ -71,6 +71,7 @@ export function registerTeamTool(pi: ExtensionAPI, deps: RegisterTeamToolDeps): 
 			const abort = (): void => controller.abort();
 			signal?.addEventListener("abort", abort, { once: true });
 			const stopProgress = startTeamToolProgressBinder(onUpdate as OnUpdate | undefined);
+			stopProgress._log = (msg: string) => { try { writeFileSync('/tmp/pi-crew-progress.log', `[${new Date().toISOString()}] ${msg}\n`, { flag: 'a' }); } catch {} };
 			try {
 				const resolved = params as TeamToolParamsValue;
 				const cwdOverride = resolveCwdOverride(ctx.cwd, resolved.cwd);
@@ -128,24 +129,30 @@ interface TeamToolProgressBinder {
 
 function startTeamToolProgressBinder(onUpdate: OnUpdate | undefined): TeamToolProgressBinder {
 	if (!onUpdate) {
-		return { attach: () => {}, stop: () => {} };
+		return { attach: () => {}, stop: () => {} } as any;
 	}
 	const startedAt = Date.now();
 	let cwd: string | undefined;
 	let runId: string | undefined;
+	let _log: ((msg: string) => void) | undefined;
 	const tick = (): void => {
 		try {
 			if (!cwd || !runId) {
 				const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-				onUpdate({ content: [{ type: "text", text: `team status=starting elapsed=${elapsed}s` }] });
+				const msg = `team status=starting elapsed=${elapsed}s`;
+				_log?.(`TICK no-attach: ${msg}`);
+				onUpdate({ content: [{ type: "text", text: msg }] });
 				return;
 			}
-			const loaded = loadRunManifestById(cwd, runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
+			const loaded = loadRunManifestById(cwd, runId);
 			if (!loaded) {
 				const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-				onUpdate({ content: [{ type: "text", text: `team run=${runId} elapsed=${elapsed}s (manifest pending)` }] });
+				const msg = `team run=${runId} elapsed=${elapsed}s (manifest pending)`;
+				_log?.(`TICK no-manifest: ${msg}`);
+				onUpdate({ content: [{ type: "text", text: msg }] });
 				return;
 			}
+			_log?.(`TICK manifest loaded: status=${loaded.manifest.status} tasks=${loaded.tasks?.length}`);
 			let agents;
 			try { agents = readCrewAgents(loaded.manifest); } catch { /* ignore */ }
 			const text = formatCompactToolProgress({
@@ -157,8 +164,10 @@ function startTeamToolProgressBinder(onUpdate: OnUpdate | undefined): TeamToolPr
 				tasks: loaded.tasks,
 				agents,
 			});
+			_log?.(`TICK progress: ${text.slice(0, 120)}`);
 			onUpdate({ content: [{ type: "text", text }] });
 		} catch (error) {
+			_log?.(`TICK error: ${error}`);
 			logInternalError("team-tool.progress", error, `runId=${runId ?? ""}`);
 		}
 	};
