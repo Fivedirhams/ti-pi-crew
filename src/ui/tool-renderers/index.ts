@@ -97,11 +97,11 @@ function progressBar(ratio: number, barWidth: number, theme: CrewTheme): string 
 // ── Frame builder ──────────────────────────────────────────────────────
 
 /** Create a rounded-corner framed card.
- *  Pi wraps our Text in Box(1,1) which subtracts 2 from content width.
- *  So frame lines must be ≤ totalWidth - 2 visible chars.
+ *  With renderShell="self", Pi no longer wraps in Box(1,1).
+ *  Frame uses full totalWidth.
  */
 function buildFrame(contentLines: string[], totalWidth: number, theme: CrewTheme, borderSlot: "success" | "error" | "border" | "borderAccent" = "border"): string {
-	const frameW = totalWidth - 2; // available after Box(1,1) padding
+	const frameW = totalWidth;
 	const innerW = frameW - 2;    // │ chars
 	const top = theme.fg(borderSlot, `╭${"─".repeat(innerW)}╮`);
 	const bottom = theme.fg(borderSlot, `╰${"─".repeat(innerW)}╯`);
@@ -134,10 +134,10 @@ export const teamToolRenderer: ToolRenderer = {
 		const header = ` ${actionBadge}${teamLabel}`;
 		contentLines.push(padVisual(header, innerW));
 
-		// Goal preview
+		// Goal preview (P5: shorten paths)
 		if (goal) {
 			const maxLen = innerW - 2;
-			const preview = goal.replace(/\n/g, " ");
+			const preview = shortenPath(goal.replace(/\n/g, " "));
 			const previewText = visibleWidth(preview) > maxLen ? truncVisual(preview, maxLen - 1) + "…" : preview;
 			contentLines.push(padVisual(` ${theme.fg("dim", previewText)}`, innerW));
 		}
@@ -370,31 +370,44 @@ function appendRunCard(lines: string[], records: CrewAgentRecord[], status: stri
 	const total = records.length;
 	const duration = computeTotalDuration(records);
 	const tokens = computeTotalTokens(records);
+	const cost = computeTotalCost(records);
 
-	// Line 1: badge + summary
+	// Line 1: badge + summary + expand hint (P2)
 	const badge = statusBadge(status, theme);
 	const title = theme.fg("toolTitle", theme.bold("crew run"));
 	const idTag = theme.fg("dim", shortId(runId));
-	lines.push(padVisual(` ${badge} ${title}  ${idTag}`, innerW));
+	const hint = theme.fg("dim", "⌘E");
+	const left = ` ${badge} ${title}  ${idTag}`;
+	const right = `${hint}`;
+	const gap = innerW - visibleWidth(left) - visibleWidth(right);
+	lines.push(padVisual(left + (gap > 1 ? " ".repeat(gap) : " ") + right, innerW));
 
-	// Line 2: compact metrics
+	// Line 2: compact metrics + cost (P1)
 	const parts: string[] = [];
 	parts.push(`${completed}/${total} done`);
 	if (duration > 0) parts.push(formatDuration(duration));
 	if (tokens > 0) parts.push(`${formatTokens(tokens)} tok`);
+	if (cost > 0) parts.push(`$${cost.toFixed(3)}`);
 	lines.push(padVisual(`   ${theme.fg("dim", parts.join(" · "))}`, innerW));
 }
 
 function appendMetricsCard(lines: string[], m: Metrics, status: string, runId: string, theme: CrewTheme, innerW: number): void {
+	// Line 1: badge + title + expand hint (P2)
 	const badge = statusBadge(status, theme);
 	const title = theme.fg("toolTitle", theme.bold("crew run"));
 	const idTag = theme.fg("dim", shortId(runId));
-	lines.push(padVisual(` ${badge} ${title}  ${idTag}`, innerW));
+	const hint = theme.fg("dim", "⌘E");
+	const left = ` ${badge} ${title}  ${idTag}`;
+	const right = `${hint}`;
+	const gap = innerW - visibleWidth(left) - visibleWidth(right);
+	lines.push(padVisual(left + (gap > 1 ? " ".repeat(gap) : " ") + right, innerW));
 
+	// Line 2: compact metrics + cost (P1)
 	const parts: string[] = [];
 	if (m.completedCount != null && m.taskCount) parts.push(`${m.completedCount}/${m.taskCount} done`);
 	if (m.durationMs) parts.push(formatDuration(m.durationMs));
 	if (m.totalTokens) parts.push(`${formatTokens(m.totalTokens)} tok`);
+	if (m.totalCost) parts.push(`$${m.totalCost.toFixed(3)}`);
 	if (parts.length) lines.push(padVisual(`   ${theme.fg("dim", parts.join(" · "))}`, innerW));
 }
 
@@ -547,10 +560,29 @@ function computeRecordDuration(r: CrewAgentRecord): number {
 	return Math.max(0, end - start);
 }
 
+function computeTotalCost(records: CrewAgentRecord[]): number {
+	let total = 0;
+	for (const r of records) { if (r.usage?.cost) total += r.usage.cost; }
+	return total;
+}
+
 function computeTotalTokens(records: CrewAgentRecord[]): number {
 	let total = 0;
 	for (const r of records) {
 		if (r.usage) total += (r.usage.input ?? 0) + (r.usage.output ?? 0) + (r.usage.cacheWrite ?? 0);
 	}
 	return total;
+}
+
+/** P5: Shorten file path by replacing $HOME with ~ */
+function shortenPath(p: string): string {
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+	if (home && p.startsWith(home)) return "~" + p.slice(home.length);
+	return p;
+}
+
+/** P8: Create clickable file hyperlink via OSC 8 */
+function linkPath(p: string, label?: string): string {
+	const display = label ?? shortenPath(p);
+	return `\x1b]8;;file://${p}\x1b\\${display}\x1b]8;;\x1b\\`;
 }

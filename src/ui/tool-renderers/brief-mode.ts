@@ -157,10 +157,14 @@ function briefAgent(result: { content?: unknown[] }, theme: CrewTheme): string {
 	const data = typeof d === "object" && d !== null ? d as Record<string, unknown> : {};
 	const status = typeof data.status === "string" ? data.status : "";
 	const agentId = typeof data.agentId === "string" ? data.agentId : "agent";
-	const icon = status === "completed" ? theme.fg("success", "✓")
-		: status === "failed" ? theme.fg("error", "✗")
-		: theme.fg("dim", "○");
-	return `${icon} ${agentId}`;
+	const icon = status === "completed" ? theme.fg("success", "\u2713")
+		: status === "failed" ? theme.fg("error", "\u2717")
+		: theme.fg("dim", "\u25CB");
+	// P3: Show duration and tokens when available
+	const parts: string[] = [agentId];
+	if (data.durationMs) parts.push(formatDuration(data.durationMs as number));
+	if (data.totalTokens) parts.push(`${formatTokens(data.totalTokens as number)} tok`);
+	return `${icon} ${parts.join(" \u00B7 ")}`;
 }
 
 function briefDefault(text: string, theme: CrewTheme): string {

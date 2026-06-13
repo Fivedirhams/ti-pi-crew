@@ -22,7 +22,6 @@ import { t } from "../../i18n.ts";
 import { loadRunManifestById } from "../../state/state-store.ts";
 import { readCrewAgents } from "../../runtime/crew-agent-records.ts";
 import { formatCompactToolProgress } from "../../ui/tool-progress-formatter.ts";
-import { writeFileSync } from "node:fs";
 import { Text } from "@earendil-works/pi-tui";
 import { agentToolRenderer } from "../../ui/tool-renderers/index.ts";
 
@@ -39,6 +38,7 @@ export function registerSubagentTools(pi: ExtensionAPI, subagentManager: Subagen
 	const agentTool: ToolDefinition = {
 		name: "Agent",
 		label: "Agent",
+		renderShell: "self",
 		description: "Launch a real pi-crew subagent. Uses pi-crew's durable child-process runtime by default; set run_in_background=true for parallel/background work, then use get_subagent_result.",
 		promptSnippet: "Use Agent to delegate focused work to a real pi-crew subagent. Use run_in_background=true for parallel work and get_subagent_result to join results.",
 		promptGuidelines: [
@@ -107,9 +107,6 @@ export function registerSubagentTools(pi: ExtensionAPI, subagentManager: Subagen
 			try {
 				return agentToolRenderer.renderResult(result, options, theme, context);
 			} catch (e: any) {
-				try {
-					writeFileSync('/tmp/pi-crew-render-error.log', `[${new Date().toISOString()}] AGENT renderResult ERROR: ${e?.message}\nstack: ${e?.stack?.slice(0,500)}\nresult keys: ${Object.keys(result ?? {})}\ndetails: ${JSON.stringify(result?.details ?? '(none)').slice(0,300)}\n\n`, { flag: 'a' });
-			} catch { /* ignore */ }
 				return new Text('agent-err: ' + (e?.message ?? 'unknown'), 0, 0);
 			}
 		},

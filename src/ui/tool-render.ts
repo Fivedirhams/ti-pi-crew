@@ -1,4 +1,8 @@
 /**
+ * @deprecated Use tool-renderers/index.ts (teamToolRenderer/agentToolRenderer) instead.
+ * This file only exports shared utility functions (truncLine, formatTokens, formatDuration).
+ * The render functions below are kept for backward-compatible tests only.
+ *
  * Shared rendering for pi-crew's tool TUI display.
  * Ports logic from pi-subagent4 adapted for pi-crew's data model.
  * Uses @earendil-works/pi-tui Components (Container, Text, Spacer) directly.

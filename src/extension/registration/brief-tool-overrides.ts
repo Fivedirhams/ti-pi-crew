@@ -76,6 +76,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "read",
 		label: "read",
+		renderShell: "self",
 		description: tools.read.description,
 		parameters: tools.read.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,6 +110,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "bash",
 		label: "bash",
+		renderShell: "self",
 		description: tools.bash.description,
 		parameters: tools.bash.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,6 +143,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "edit",
 		label: "edit",
+		renderShell: "self",
 		description: tools.edit.description,
 		parameters: tools.edit.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,6 +182,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "write",
 		label: "write",
+		renderShell: "self",
 		description: tools.write.description,
 		parameters: tools.write.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,6 +210,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "find",
 		label: "find",
+		renderShell: "self",
 		description: tools.find.description,
 		parameters: tools.find.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -235,6 +240,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "grep",
 		label: "grep",
+		renderShell: "self",
 		description: tools.grep.description,
 		parameters: tools.grep.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,6 +270,7 @@ export function registerBriefToolOverrides(pi: ExtensionAPI, cwd: string): void 
 	pi.registerTool({
 		name: "ls",
 		label: "ls",
+		renderShell: "self",
 		description: tools.ls.description,
 		parameters: tools.ls.parameters,
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
