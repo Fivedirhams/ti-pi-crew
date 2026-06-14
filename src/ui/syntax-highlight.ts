@@ -298,6 +298,12 @@ export const languageMap: Record<string, string> = {
 export function highlightCode(code: string, language: string | undefined, themeLike: unknown = undefined): string {
 	const theme = asCrewTheme(themeLike);
 	const validLanguage = language && supportsLanguage(language) ? language : undefined;
+	// Shiki cache hit: use the richer Shiki coloring (already computed from a
+	// prior async upgrade). Falls through to cli-highlight otherwise.
+	if (validLanguage) {
+		const cached = shikiCacheGet(code, validLanguage);
+		if (cached !== undefined) return cached;
+	}
 	return hlCliSync(code, validLanguage, theme);
 }
 
@@ -378,3 +384,45 @@ export async function highlightCodeAsync(
 // ── Re-exports for callers that want raw Shiki access ────────────────────
 
 export { detectLanguageFromPath };
+
+// ── Sync-aware Shiki helpers ─────────────────────────────────────────────
+// These let a sync renderer (e.g. transcript viewer) benefit from Shiki:
+//   - shikiCacheGet(): returns an already-computed Shiki result (or undefined)
+//   - scheduleShikiUpgrade(): fire-and-forget Shiki; fills the cache + invokes
+//     onRequestRender when done so the component re-renders and picks up the
+//     cached result on the next render pass.
+
+/** Read an already-computed Shiki result from the cache, or undefined. */
+export function shikiCacheGet(code: string, language: string): string | undefined {
+	if (!code || code.length > MAX_SHIKI_CHARS) return undefined;
+	const theme = activeShikiTheme();
+	return _shikiCache.get(`${theme}\0${language}\0${code}`);
+}
+
+/** Fire-and-forget Shiki highlight. On success, the result is stored in the
+ *  cache and `onRequestRender()` is invoked (so callers can trigger a redraw,
+ *  after which highlightCode() will pick up the cached Shiki text). */
+export function scheduleShikiUpgrade(
+	code: string,
+	language: string | undefined,
+	onRequestRender?: () => void,
+): void {
+	const lang = language && supportsLanguage(language) ? language : undefined;
+	if (!code || code.length > MAX_SHIKI_CHARS || !lang) return;
+	// Already cached or already in-flight? Check cache to avoid redundant work.
+	if (shikiCacheGet(code, lang) !== undefined) return;
+	// Mark in-flight to dedupe concurrent upgrades for the same block.
+	_inflight.add(`${activeShikiTheme()}\0${lang}\0${code}`);
+	hlShiki(code, lang)
+		.then((result) => {
+			if (result !== null) onRequestRender?.();
+		})
+		.catch(() => {
+			// Swallow — Shiki is best-effort; cli-highlight output stands.
+		})
+		.finally(() => {
+			_inflight.delete(`${activeShikiTheme()}\0${lang}\0${code}`);
+		});
+}
+
+const _inflight = new Set<string>();
