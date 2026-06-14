@@ -369,9 +369,24 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 					// than pi-crew config (e.g. ~/.pi/agent/settings.json).
 					try {
 						if (action === "piTheme" && typeof value === "string") {
-							const { setPiTheme } = await import("../../ui/theme-discovery.ts");
-							setPiTheme(value);
-							ctx.ui.notify(`Pi theme set to '${value}'. Restart Pi to apply.`, "info");
+							// Live theme switch: ctx.ui.setTheme() swaps the global theme,
+							// persists it to settings.json, and triggers a UI redraw — no
+							// restart needed. Falls back to file-write + restart hint if
+							// the live API is unavailable (e.g. non-TUI mode).
+							if (typeof ctx.ui.setTheme === "function") {
+								const res = ctx.ui.setTheme(value);
+								if (res.success) {
+									ctx.ui.notify(`Theme: ${value} (applied live)`, "info");
+								} else {
+									const { setPiTheme } = await import("../../ui/theme-discovery.ts");
+									setPiTheme(value);
+									ctx.ui.notify(`Theme saved as '${value}' but failed to apply: ${res.error ?? "unknown"}. Restart Pi.`, "warning");
+								}
+							} else {
+								const { setPiTheme } = await import("../../ui/theme-discovery.ts");
+								setPiTheme(value);
+								ctx.ui.notify(`Pi theme set to '${value}'. Restart Pi to apply.`, "info");
+							}
 						}
 					} catch (error) {
 						ctx.ui.notify(`Failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -383,6 +398,18 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 		}
 		const result = await handleTeamTool({ action: "settings", config: { args: args.trim() } }, teamCommandContext(ctx));
 		await notifyCommandResult(ctx, commandText(result));
+		// Live-switch hook: when the text subcommand 'theme <name>' succeeds,
+		// also apply the theme live via ctx.ui.setTheme() (no restart). The
+		// handler above only writes to settings.json.
+		const trimmed = args.trim();
+		if (trimmed.startsWith("theme ")) {
+			const themeName = trimmed.slice(6).trim();
+			if (themeName && typeof ctx.ui.setTheme === "function") {
+				const res = ctx.ui.setTheme(themeName);
+				if (res.success) ctx.ui.notify(`Theme: ${themeName} (applied live)`, "info");
+				else ctx.ui.notify(`Saved but live-switch failed: ${res.error ?? "unknown"}. Restart Pi.`, "warning");
+			}
+		}
 	},
 })
 

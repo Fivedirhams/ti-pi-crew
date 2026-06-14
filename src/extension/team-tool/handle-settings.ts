@@ -253,7 +253,7 @@ const USAGE = [
 	"  schema                Show all known config keys (schema reference)",
 	"  paths                 Show config file paths (user + project)",
 	"  themes                Browse theme gallery (Pi UI + Shiki code themes)",
-	"  theme <name>          Switch the Pi UI theme (restart Pi to apply)",
+	"  theme <name>          Switch the Pi UI theme (applies live, no restart)",
 	"  shiki <name>          Override the Shiki syntax-highlight theme",
 	"  get <key>             Get a specific config value",
 	"  set <key> <value>     Set a config value",
@@ -362,7 +362,7 @@ export function handleSettings(params: { config?: Record<string, unknown> }, ctx
 				[
 					`✓ Pi theme set to '${name}'`,
 					`  Written to: ${savedTo}`,
-					`  Restart Pi (or reload) to apply the new UI colors.`,
+					`  Applied live — no restart needed.`,
 					``,
 					`The Shiki code-highlight theme will auto-resolve from this Pi theme.`,
 				].join("\n"),
