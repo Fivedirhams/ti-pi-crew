@@ -123,7 +123,21 @@ function resolveShikiTheme(): string {
 	}
 }
 
-let SHIKI_THEME: string = resolveShikiTheme();
+// Resolve the active Shiki theme lazily and cache briefly so config changes
+// (e.g. `team-settings shiki dracula`) take effect without a module reload.
+// The cache TTL is short (5s) so env/config edits propagate promptly.
+const SHIKI_THEME_CACHE_TTL_MS = 5_000;
+let _cachedShikiTheme: string | undefined;
+let _cachedShikiThemeAt = 0;
+
+function activeShikiTheme(): string {
+	const now = Date.now();
+	if (_cachedShikiTheme === undefined || now - _cachedShikiThemeAt > SHIKI_THEME_CACHE_TTL_MS) {
+		_cachedShikiTheme = resolveShikiTheme();
+		_cachedShikiThemeAt = now;
+	}
+	return _cachedShikiTheme;
+}
 
 // ── Contrast normalization (ported from pi-pretty) ──────────────────────
 // Shiki themes designed for white backgrounds (e.g. "github-light") produce
@@ -172,11 +186,12 @@ async function hlShiki(code: string, language: string): Promise<string | null> {
 	if (!code || code.length > MAX_SHIKI_CHARS) return null;
 	const fn = await loadShiki();
 	if (!fn) return null;
-	const key = `${SHIKI_THEME}\0${language}\0${code}`;
+	const theme = activeShikiTheme();
+	const key = `${theme}\0${language}\0${code}`;
 	const hit = _shikiCache.get(key);
 	if (hit !== undefined) return hit;
 	try {
-		const ansi = normalizeShikiContrast(await fn(code, language, SHIKI_THEME));
+		const ansi = normalizeShikiContrast(await fn(code, language, theme));
 		const out = ansi.endsWith("\n") ? ansi.slice(0, -1) : ansi;
 		return touchShikiCache(key, out);
 	} catch {

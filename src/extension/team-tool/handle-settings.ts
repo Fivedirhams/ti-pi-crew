@@ -230,6 +230,7 @@ const KNOWN_KEYS = new Set([
 	"ui.powerbar",
 	"ui.mascotStyle",
 	"ui.mascotEffect",
+	"ui.shikiTheme",
 ]);
 
 const KNOWN_SORTED = [...KNOWN_KEYS].sort();
