@@ -143,6 +143,11 @@ export function listShikiThemesGrouped(): ShikiThemeGroup[] {
 	];
 }
 
+/** All Shiki bundled theme names, sorted. Flat list for use in pickers. */
+export function listShikiThemeNames(): string[] {
+	return Object.keys(bundledThemes).sort();
+}
+
 /** Map a Pi theme name to the Shiki theme it resolves to (via alias map). */
 export function resolveShikiForPiTheme(piTheme: string | undefined): string {
 	if (!piTheme) return DEFAULT_SHIKI_THEME;

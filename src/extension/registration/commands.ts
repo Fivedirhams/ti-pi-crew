@@ -364,7 +364,19 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 					} catch (error) {
 						ctx.ui.notify(`Failed to save: ${error instanceof Error ? error.message : String(error)}`, "error");
 					}
-				}, () => done(undefined));
+				}, () => done(undefined), async (action: string, value: unknown) => {
+					// Action callbacks (Pi theme switch) write to a different store
+					// than pi-crew config (e.g. ~/.pi/agent/settings.json).
+					try {
+						if (action === "piTheme" && typeof value === "string") {
+							const { setPiTheme } = await import("../../ui/theme-discovery.ts");
+							setPiTheme(value);
+							ctx.ui.notify(`Pi theme set to '${value}'. Restart Pi to apply.`, "info");
+						}
+					} catch (error) {
+						ctx.ui.notify(`Failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+					}
+				});
 				return overlay;
 			}, { overlay: true, overlayOptions: { width: "90%", maxHeight: "85%", anchor: "center" } });
 			return;

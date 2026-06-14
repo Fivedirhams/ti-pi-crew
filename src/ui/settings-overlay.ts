@@ -5,12 +5,13 @@
  */
 import type { CrewTheme } from "./theme-adapter.ts";
 import { DynamicCrewBorder } from "./dynamic-border.ts";
+import { discoverPiThemes, getActivePiTheme, listShikiThemeNames } from "./theme-discovery.ts";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type SettingType = "boolean" | "enum" | "number" | "string" | "agent";
+export type SettingType = "boolean" | "enum" | "number" | "string" | "agent" | "action";
 
 export interface SettingDef {
 	id: string;
@@ -21,11 +22,16 @@ export interface SettingDef {
 	values?: string[];
 	/** Tab grouping */
 	tab: string;
+	/** For type="action": identifier dispatched to onAction (e.g. "piTheme"). */
+	action?: string;
 }
 
 export interface SettingsOverlayCallbacks {
 	onChange: (id: string, value: unknown) => void;
 	onClose: () => void;
+	/** Dispatched for type="action" settings (e.g. Pi theme switch, which
+	 * writes to settings.json rather than pi-crew config). Optional. */
+	onAction?: (action: string, value: unknown) => void;
 }
 
 interface TabDef {
@@ -43,6 +49,7 @@ const TABS: TabDef[] = [
 	{ id: "limits", label: "Limits", icon: "📐" },
 	{ id: "agents", label: "Agents", icon: "🤖" },
 	{ id: "ui", label: "UI", icon: "🖥" },
+	{ id: "themes", label: "Themes", icon: "🎨" },
 	{ id: "autonomous", label: "Auto", icon: "🚀" },
 	{ id: "advanced", label: "Advanced", icon: "🔧" },
 ];
@@ -74,6 +81,9 @@ const SETTINGS: SettingDef[] = [
 	{ id: "ui.dashboardWidth", label: "Dashboard Width", type: "number", tab: "ui", description: "Dashboard width as percentage or pixels." },
 	{ id: "ui.autoOpenDashboard", label: "Auto Open Dashboard", type: "boolean", tab: "ui", description: "Auto-open dashboard when a run starts." },
 	{ id: "ui.widgetPlacement", label: "Widget Placement", type: "enum", values: ["bottom", "hidden"], tab: "ui", description: "Where to place the crew widget." },
+	// ── Themes tab ──
+	{ id: "__piTheme__", label: "Pi UI Theme", type: "action", action: "piTheme", values: discoverPiThemes().map((t) => t.name), tab: "themes", description: "Overall terminal theme. Restarts Pi to apply. Currently: " + (getActivePiTheme() ?? "dark (default)") },
+	{ id: "ui.shikiTheme", label: "Shiki Code Theme", type: "enum", values: listShikiThemeNames(), tab: "themes", description: "Syntax-highlight theme for code blocks. Empty = auto-resolve from Pi theme. (Esc when blank to keep default.)" },
 	// Autonomous
 	{ id: "autonomous.enabled", label: "Enabled", type: "boolean", tab: "autonomous", description: "Enable autonomous pi-crew delegation." },
 	{ id: "autonomous.injectPolicy", label: "Inject Policy", type: "boolean", tab: "autonomous", description: "Inject delegation policy into agent context." },
@@ -196,12 +206,21 @@ function isExplicitlySet(config: Record<string, unknown>, id: string): boolean {
 	return getNestedValue(config, id) !== undefined;
 }
 
+/** Resolve the live current value for a setting, including special-case IDs
+ * (e.g. __piTheme__ which lives in Pi's settings.json, not pi-crew config). */
+function currentValueFor(config: Record<string, unknown>, id: string): unknown {
+	if (id === "__piTheme__") return getActivePiTheme() ?? "dark";
+	return getNestedValue(config, id);
+}
+
 // ---------------------------------------------------------------------------
 // Submenu: Select from list (enum picker)
 // ---------------------------------------------------------------------------
 
 class SelectSubmenu {
 	private selectedIndex = 0;
+	private scrollOffset = 0;
+	private readonly maxVisible = 14;
 	private readonly items: string[];
 	private readonly theme: CrewTheme;
 	private readonly onSelect: (value: string) => void;
@@ -217,35 +236,57 @@ class SelectSubmenu {
 		this.onSelect = onSelect;
 		this.onCancel = onCancel;
 		this.selectedIndex = Math.max(0, options.indexOf(current));
+		// Center the cursor in the visible window on open.
+		this.scrollOffset = Math.max(0, this.selectedIndex - Math.floor(this.maxVisible / 2));
 	}
 
 	invalidate(): void {}
 
+	private ensureVisible(): void {
+		if (this.selectedIndex < this.scrollOffset) {
+			this.scrollOffset = this.selectedIndex;
+		} else if (this.selectedIndex >= this.scrollOffset + this.maxVisible) {
+			this.scrollOffset = this.selectedIndex - this.maxVisible + 1;
+		}
+	}
+
 	render(width: number): string[] {
+		void width;
 		const lines: string[] = [];
 		lines.push(this.theme.bold(this.theme.fg("accent", this.title)));
 		if (this.description) {
 			lines.push(this.theme.fg("muted", this.description));
 		}
 		lines.push("");
-		for (const [i, item] of this.items.entries()) {
+		const start = this.scrollOffset;
+		const end = Math.min(start + this.maxVisible, this.items.length);
+		const needsScroll = this.items.length > this.maxVisible;
+		if (needsScroll && start > 0) {
+			lines.push(this.theme.fg("dim", `  ▲ ${start} more above`));
+		}
+		for (let i = start; i < end; i++) {
 			const isSelected = i === this.selectedIndex;
 			const prefix = isSelected ? " → " : "   ";
-			const line = `${prefix}${item}`;
+			const line = `${prefix}${this.items[i]}`;
 			lines.push(isSelected ? (this.theme.inverse?.(line) ?? line) : line);
 		}
+		if (needsScroll && end < this.items.length) {
+			lines.push(this.theme.fg("dim", `  ▼ ${this.items.length - end} more below`));
+		}
 		lines.push("");
-		lines.push(this.theme.fg("dim", "Enter to select · Esc to go back"));
+		lines.push(this.theme.fg("dim", "↑↓ navigate · Enter to select · Esc to go back"));
 		return lines;
 	}
 
 	handleInput(data: string): void {
 		if (data === "\x1b[A" || data === "k") {
 			this.selectedIndex = (this.selectedIndex - 1 + this.items.length) % this.items.length;
+			this.ensureVisible();
 			return;
 		}
 		if (data === "\x1b[B" || data === "j") {
 			this.selectedIndex = (this.selectedIndex + 1) % this.items.length;
+			this.ensureVisible();
 			return;
 		}
 		if (data === "\r" || data === "\n") {
@@ -514,8 +555,8 @@ class SettingsOverlay {
 
 			const effective = this.changedValues.has(def.id)
 				? this.changedValues.get(def.id)
-				: getNestedValue(this.config, def.id);
-			const isDefault = !this.changedValues.has(def.id) && !isExplicitlySet(this.config, def.id);
+				: currentValueFor(this.config, def.id);
+			const isDefault = !this.changedValues.has(def.id) && !isExplicitlySet(this.config, def.id) && def.id !== "__piTheme__";
 			const valueStr = formatValue(effective, def.id);
 			const suffix = isDefault && (effective !== undefined || EFFECTIVE_DEFAULTS[def.id] !== undefined) ? " (default)" : "";
 
@@ -696,6 +737,28 @@ class SettingsOverlay {
 				);
 				break;
 			}
+			case "action": {
+				if (!def.values?.length || !def.action) break;
+				const actionCurrent = typeof this.changedValues.get(def.id) === "string"
+					? (this.changedValues.get(def.id) as string)
+					: (currentValueFor(this.config, def.id) as string | undefined) ?? "";
+				this.submenuSettingId = def.id;
+				this.submenu = new SelectSubmenu(
+					def.label,
+					def.description ?? "",
+					def.values,
+					actionCurrent,
+					this.theme,
+					(value: string) => {
+						this.changedValues.set(def.id, value);
+						this.callbacks.onAction?.(def.action!, value);
+						this.submenu = null;
+						this.submenuSettingId = null;
+					},
+					() => { this.submenu = null; this.submenuSettingId = null; },
+				);
+				break;
+			}
 		}
 	}
 
@@ -717,7 +780,8 @@ export function createSettingsOverlay(
 	theme: CrewTheme,
 	onChange: (id: string, value: unknown) => void,
 	done: () => void,
+	onAction?: (action: string, value: unknown) => void,
 ) {
-	const overlay = new SettingsOverlay(config, theme, { onChange, onClose: done });
+	const overlay = new SettingsOverlay(config, theme, { onChange, onClose: done, onAction });
 	return { overlay, component: overlay };
 }
