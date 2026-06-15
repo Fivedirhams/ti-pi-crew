@@ -72,7 +72,7 @@ function formatCrewArtifactIndex(entries: CrewArtifactIndexEntry[]): string {
  * Collect in-flight (non-terminal) crew runs that must be resumable after
  * compaction. These are runs the agent was actively working on or awaiting.
  */
-function collectInFlightRuns(cwd: string): TeamRunManifest[] {
+export function collectInFlightRuns(cwd: string): TeamRunManifest[] {
 	return listRecentRuns(cwd, MAX_ARTIFACT_INDEX_RUNS).filter((run) =>
 		IN_FLIGHT_RUN_STATUSES.has(run.status),
 	);
@@ -103,6 +103,50 @@ function formatResumeDirective(runs: TeamRunManifest[]): string {
 	lines.push("to retrieve results. If a task was mid-execution and the worker is still alive,");
 	lines.push("it continues independently — just re-attach. Do not restart completed work.");
 	return lines.join("\n");
+}
+
+/**
+ * Build a short continuation prompt for sendUserMessage. This is what actually
+ * makes the agent resume after compaction — Pi's threshold compaction does NOT
+ * auto-retry (it stops and waits for user input). By injecting this as a user
+ * message that triggers a turn, the agent automatically continues the in-flight
+ * crew task instead of stalling until the user types "continue".
+ */
+export function buildContinuationPrompt(runs: TeamRunManifest[]): string {
+	if (!runs.length) return "";
+	const lines = [
+		"[pi-crew] Context was compacted while crew tasks were still in-flight. Continue the work — do not wait for me.",
+	];
+	for (const run of runs) {
+		const wf = run.workflow ? `, workflow=${run.workflow}` : "";
+		lines.push(`- runId=${run.runId} (status=${run.status}, team=${run.team}${wf}): ${run.goal}`);
+	}
+	lines.push("");
+	lines.push("Resume: call `team` with action='status' to check progress, then action='wait' (join a running task), action='summary', or action='get' as appropriate. If a worker is still alive it continues independently — just re-attach. Do NOT restart completed work.");
+	return lines.join("\n");
+}
+
+/**
+ * Trigger automatic agent continuation after compaction. Fire-and-forget the
+ * promise — never block the compaction flow. The sendUserMessage type is
+ * declared `void` but the runtime returns a Promise (it triggers an agent turn).
+ */
+export function triggerContinuation(pi: ExtensionAPI, ctx: ExtensionContext, runs: TeamRunManifest[]): void {
+	if (!runs.length) return;
+	const prompt = buildContinuationPrompt(runs);
+	try {
+		const result = pi.sendUserMessage(prompt) as unknown;
+		Promise.resolve(result).catch(() => {
+			// best-effort: if continuation fails, at least notify
+			try {
+				ctx.ui.notify("pi-crew: auto-continuation after compaction failed — use team status to resume manually.", "warning");
+			} catch {
+				// swallow
+			}
+		});
+	} catch {
+		// best-effort
+	}
 }
 
 /** Combined customInstructions injected into proactive compaction summaries. */
@@ -145,6 +189,11 @@ export function registerCompactionGuard(pi: ExtensionAPI, options: RegisterCompa
 			customInstructions,
 			onComplete: () => {
 				compactionInProgress = false;
+				// O10 FIX: Pi's threshold compaction does NOT auto-retry — it
+				// stops and waits for user input. Trigger automatic
+				// continuation so the agent resumes the in-flight crew task.
+				const runs = collectInFlightRuns(ctx.cwd);
+				triggerContinuation(pi, ctx, runs);
 				ctx.ui.notify(reason === "deferred" ? "Deferred compaction completed" : "Auto-compacted context during team run", "info");
 			},
 			onError: (error) => {
@@ -162,15 +211,17 @@ export function registerCompactionGuard(pi: ExtensionAPI, options: RegisterCompa
 	});
 
 	// O10: After ANY compaction (proactive OR reactive/Pi-triggered), detect
-	// in-flight crew runs and inject a continuation hint so the agent resumes
-	// rather than abandoning the task. This covers the case where Pi
-	// auto-compacts without going through our proactive startCompact path.
+	// in-flight crew runs and trigger automatic continuation. This is the
+	// critical fix: Pi's threshold compaction does NOT auto-retry — it stops
+	// and waits for user input. By injecting a continuation user message that
+	// triggers a turn, the agent automatically resumes the in-flight crew task.
+	// This covers the common case where Pi auto-compacts without going through
+	// our proactive startCompact path.
 	pi.on("session_compact", (_event, ctx) => {
 		try {
 			const inFlight = collectInFlightRuns(ctx.cwd);
 			if (inFlight.length === 0) return;
-			// Re-append the resume directive into the fresh post-compaction
-			// context. This entry is now the most recent and will be visible.
+			// Re-append the resume directive entry for durable record.
 			pi.appendEntry("crew:resume-directive", {
 				reason: "post-compaction-continuation",
 				createdAt: new Date().toISOString(),
@@ -183,9 +234,12 @@ export function registerCompactionGuard(pi: ExtensionAPI, options: RegisterCompa
 				})),
 			});
 			ctx.ui.notify(
-				`Context compacted. ${inFlight.length} pi-crew run(s) still in-flight — use team status to continue.`,
+				`Context compacted. ${inFlight.length} pi-crew run(s) still in-flight — auto-resuming.`,
 				"info",
 			);
+			// THE FIX: trigger automatic continuation. Without this, Pi stops
+			// after threshold compaction and the user must type "continue".
+			triggerContinuation(pi, ctx, inFlight);
 		} catch {
 			// best-effort: never block compaction completion
 		}
