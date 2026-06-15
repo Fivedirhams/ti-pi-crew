@@ -30,6 +30,14 @@ export const ErrorCode = {
   InvalidStatusTransition: "E004",  // Run/task status cannot legally transition
   ConfigError: "E005",              // Malformed config or missing required field
   ResourceNotFound: "E006",         // Agent/team/workflow not found in discovery paths
+  // E1 (Round 15): runtime failure categories that previously threw raw Error
+  // with no code, no help hint, and no context. Surfaces actionable guidance.
+  ChildTimeout: "E007",             // Child Pi worker became unresponsive and was killed
+  ModelExhausted: "E008",           // All model candidates in the fallback chain failed
+  PreStepFailed: "E009",            // A pre-step hook script returned a non-zero exit
+  EventLogLockTimeout: "E010",      // Could not acquire the event-log file lock
+  DepthLimitExceeded: "E011",       // Pipeline/chain recursion depth limit hit (circular dep)
+  RunStale: "E012",                 // Run reconciled as stale/zombie (heartbeat expired)
 } as const;
 
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
@@ -41,6 +49,13 @@ const DEFAULT_HELP: Record<ErrorCode, string | undefined> = {
   [ErrorCode.InvalidStatusTransition]: "Verify the run status using `team status` before retrying.",
   [ErrorCode.ConfigError]: "Check the configuration file for syntax errors or missing required fields.",
   [ErrorCode.ResourceNotFound]: "Use `team list` to see available agents, teams, and workflows.",
+  // E1 (Round 15): help hints for the new runtime categories.
+  [ErrorCode.ChildTimeout]: "The child Pi worker produced no output for too long and was terminated. Re-run the team; if it recurs, raise the response timeout in config or reduce the task scope.",
+  [ErrorCode.ModelExhausted]: "Every model in the fallback chain failed. Check your API key/quota and the per-attempt errors, then retry or swap the model in config.",
+  [ErrorCode.PreStepFailed]: "The pre-step hook script exited non-zero. Inspect its stderr, or mark it optional in the workflow step (preStepOptional).",
+  [ErrorCode.EventLogLockTimeout]: "Another process holds the event-log lock. Check for orphaned `.lock` files or stale pi-crew processes, then retry.",
+  [ErrorCode.DepthLimitExceeded]: "A pipeline/chain exceeded the recursion depth limit, which usually indicates a circular stage dependency. Review step `dependsOn` chains.",
+  [ErrorCode.RunStale]: "The worker stopped heartbeating and was treated as a zombie. Re-run the team (resume or fresh); if it recurs, check `runtime.executeWorkers` / system load.",
 };
 
 /**
@@ -121,5 +136,56 @@ export const errors = {
       ErrorCode.ResourceNotFound,
       `${type} '${name}' not found in any discovery path`,
     );
+  },
+
+  // E1 (Round 15): runtime failure constructors. These wrap the raw-throw
+  // sites identified in the Round 15 error-experience audit so failures carry
+  // a machine-readable code, a help hint, and structured context.
+  childTimeout(detail: { timeoutMs?: number; taskId?: string; stderr?: string }): CrewError {
+    const tail = detail.stderr ? ` Stderr tail: ${detail.stderr.slice(-400)}` : "";
+    const dur = detail.timeoutMs ? ` after ${detail.timeoutMs}ms of no output` : "";
+    return new CrewError(
+      ErrorCode.ChildTimeout,
+      `Child Pi worker became unresponsive${dur} and was terminated.${tail}`,
+    ).withContext(`worker execution${detail.taskId ? ` (task ${detail.taskId})` : ""}`);
+  },
+
+  modelExhausted(chain: string[], lastFailure?: string): CrewError {
+    const tried = chain.join(" → ");
+    const last = lastFailure ? ` Last failure: ${lastFailure}` : "";
+    return new CrewError(
+      ErrorCode.ModelExhausted,
+      `All ${chain.length} model candidates exhausted (tried: ${tried}).${last}`,
+    ).withContext("model fallback chain");
+  },
+
+  preStepFailed(script: string, exitCode: number | undefined, stderr?: string): CrewError {
+    const tail = stderr ? ` Stderr: ${stderr.slice(-400)}` : "";
+    return new CrewError(
+      ErrorCode.PreStepFailed,
+      `preStepScript '${script}' exited ${exitCode ?? "non-zero"}.${tail}`,
+    ).withContext("pre-step hook execution");
+  },
+
+  eventLogLockTimeout(eventsPath: string, timeoutMs: number): CrewError {
+    return new CrewError(
+      ErrorCode.EventLogLockTimeout,
+      `Event log lock timeout for ${eventsPath}: could not acquire lock within ${timeoutMs}ms`,
+    ).withContext("event-log append");
+  },
+
+  depthLimitExceeded(depth: number, kind = "pipeline"): CrewError {
+    return new CrewError(
+      ErrorCode.DepthLimitExceeded,
+      `${kind[0].toUpperCase() + kind.slice(1)} recursion depth limit exceeded (${depth}). Possible circular dependency.`,
+    ).withContext(`${kind} execution`);
+  },
+
+  runStale(reason: string, heartbeatAgeSeconds?: number): CrewError {
+    const age = heartbeatAgeSeconds !== undefined ? ` Last heartbeat was ${heartbeatAgeSeconds}s ago.` : "";
+    return new CrewError(
+      ErrorCode.RunStale,
+      `Stale run reconciled (reason=${reason}).${age} The worker stopped heartbeating and was treated as dead/zombie.`,
+    ).withContext("stale-run reconciliation");
   },
 } as const;

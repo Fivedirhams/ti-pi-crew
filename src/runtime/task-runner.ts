@@ -11,6 +11,7 @@ import type {
 	VerificationEvidence,
 } from "../state/types.ts";
 import { logInternalError } from "../utils/internal-error.ts";
+import { errors } from "../errors.ts";
 import { writeArtifact } from "../state/artifact-store.ts";
 import { appendEventAsync, appendEventFireAndForget } from "../state/event-log.ts";
 import { saveRunManifest } from "../state/state-store.ts";
@@ -288,7 +289,10 @@ export async function runTeamTask(
 				});
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				throw new Error(`preStepScript failed: ${input.step.preStepScript}: ${msg}`);
+				const exitCode = (err as NodeJS.ErrnoException & { status?: number }).status;
+				// E1 (Round 15): structured CrewError with code E009 + help hint,
+				// instead of a raw Error. Surfaces the script path, exit code, and stderr.
+				throw errors.preStepFailed(input.step.preStepScript, exitCode, msg);
 			}
 		}
 
@@ -699,6 +703,15 @@ export async function runTeamTask(
 						? childResult.stderr ||
 							`Child Pi exited with ${childResult.exitCode}`
 						: undefined);
+				// E1/E7 (Round 15): when the child timed out, surface a structured
+				// CrewError (E007) so users get a code + actionable help hint instead
+				// of a bare 'no new output for N ms'. We keep .message as the task error.
+				if (childResult.exitStatus?.timedOut) {
+					error = errors.childTimeout({
+						taskId: task.id,
+						stderr: childResult.stderr,
+					}).message;
+				}
 				persistHeartbeat(true);
 				persistChildProgress({ type: "attempt_finished" }, true);
 				const attempt: ModelAttemptSummary = {
@@ -728,8 +741,9 @@ export async function runTeamTask(
 			// upgrade a plan, or change the model config. Include the chain tried +
 			// the final reason.
 			if (error && modelAttempts.length > 1) {
-				const chain = modelAttempts.map((a) => a.model).join(" → ");
-				error = `All ${modelAttempts.length} model candidates exhausted (tried: ${chain}). Last failure: ${error}`;
+				// E2/E1 (Round 15): structured CrewError (E008). Build via the factory so
+				// the error carries a code + help hint; keep its .message as the task error.
+				error = errors.modelExhausted(modelAttempts.map((a) => a.model), error).message;
 			}
 			// NEW-8 fix: register all attempt transcripts as artifacts, not just the used one.
 			// Earlier failed attempts' transcripts exist on disk but were invisible to the artifact system.

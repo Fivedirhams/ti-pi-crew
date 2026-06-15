@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { DEFAULT_EVENT_LOG } from "../config/defaults.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
+import { errors } from "../errors.ts";
 import { emitFromTeamEvent } from "../ui/run-event-bus.ts";
 import { logInternalError } from "../utils/internal-error.ts";
 import { readJsonlSince, type IncrementalReadState } from "../utils/incremental-reader.ts";
@@ -105,9 +106,9 @@ export function withEventLogLockSync<T>(eventsPath: string, fn: () => T): T {
 				// SECURITY (HIGH #2 fix): Throw instead of continuing without lock.
 				// Previously this logged and broke out of the loop, executing the
 				// operation without lock protection. Now we throw so callers can retry.
-				throw new Error(
-					`Event log lock timeout for ${eventsPath}: could not acquire lock within ${timeout}ms`,
-				);
+				// E1 (Round 15): structured CrewError (E010) with help hint so users know
+				// to check for orphaned .lock dirs / stale processes.
+				throw errors.eventLogLockTimeout(eventsPath, timeout);
 			}
 			// Stale detection: if the owning process is dead, remove the stale lock.
 			try {

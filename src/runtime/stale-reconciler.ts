@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { TeamRunManifest, TeamTaskState } from "../state/types.ts";
+import { errors } from "../errors.ts";
 import { recordFromTask, upsertCrewAgent } from "./crew-agent-records.ts";
 import { checkProcessLiveness } from "./process-status.ts";
 import { saveRunManifest } from "../state/state-store.ts";
@@ -273,19 +274,20 @@ function getRunningTaskStaleness(
  * Repair a stale run by marking it as failed and cancelling running tasks.
  */
 /**
- * E3 (Round 15): Build a human-actionable error string for a stale-reconciled
+ * E3/E1 (Round 15): Build a human-actionable error string for a stale-reconciled
  * task. Explains WHY the run was marked stale (the detected reason) and gives
  * concrete remediation, instead of the bare 'Stale run reconciled: <reason>'.
+ * Now returns a structured CrewError (E012) so callers also get a machine-
+ * readable code + help hint; `.message` carries the same rich text as before.
  */
+function buildStaleReconcileError(task: TeamTaskState, reason: string): Error {
+	const heartbeatAgeSeconds = task.heartbeat?.lastSeenAt ? Math.round((Date.now() - new Date(task.heartbeat.lastSeenAt).getTime()) / 1000) : undefined;
+	return errors.runStale(reason, heartbeatAgeSeconds);
+}
+
+/** @deprecated use buildStaleReconcileError (returns a structured CrewError). Kept for any external callers. */
 function formatStaleReconcileError(task: TeamTaskState, reason: string): string {
-	const heartbeatAge = task.heartbeat?.lastSeenAt ? Math.round((Date.now() - new Date(task.heartbeat.lastSeenAt).getTime()) / 1000) : undefined;
-	const ageHint = heartbeatAge !== undefined ? ` Last heartbeat was ${heartbeatAge}s ago.` : "";
-	return [
-		`Stale run reconciled (reason=${reason}).${ageHint}`,
-		"The worker process stopped updating its heartbeat and was treated as dead/zombie.",
-		"Remediation: re-run the team (action='run' with resume, or a fresh run); if this repeats,",
-		"check `runtime.executeWorkers` / system load, or raise the stale threshold in config.",
-	].join(" ");
+	return buildStaleReconcileError(task, reason).message;
 }
 
 function repairStaleRun(
@@ -304,10 +306,8 @@ function repairStaleRun(
 				...task,
 				status: "cancelled" as const,
 				finishedAt: now,
-				// E3 (Round 15): richer stale-reconcile error. The previous 'Stale run
-				// reconciled: <reason>' gave no clue what 'stale' means or how to
-				// recover. Explain the heartbeat mechanism + concrete remediation.
-				error: formatStaleReconcileError(task, reason),
+				// E3/E1 (Round 15): structured CrewError (E012) with code + help hint.
+				error: buildStaleReconcileError(task, reason).message,
 			};
 		}
 		return task;

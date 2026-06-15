@@ -3,6 +3,7 @@ import type { WorkflowConfig, WorkflowStep } from "../workflows/workflow-config.
 import type { TeamConfig } from "../teams/team-config.ts";
 import type { AgentConfig } from "../agents/agent-config.ts";
 import { appendEventAsync } from "../state/event-log.ts";
+import { errors } from "../errors.ts";
 import { mapConcurrent } from "./parallel-utils.ts";
 
 /**
@@ -242,7 +243,8 @@ export class PipelineRunner {
 	): Promise<unknown[]> {
 		// CRITICAL-6: Prevent stack overflow from deep recursion
 		if (depth > 50) {
-			throw new Error(`Pipeline recursion depth limit exceeded (${depth}). Possible circular stage dependency.`);
+			// E1 (Round 15): structured CrewError (E011) with help hint.
+			throw errors.depthLimitExceeded(depth, "pipeline");
 		}
 
 		const fanOut = stage.fanOut ?? true;
