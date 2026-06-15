@@ -22,6 +22,10 @@ export function handleStatus(params: TeamToolParamsValue, ctx: TeamContext): PiT
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "status", status: "error" }, true);
 	let { manifest, tasks } = loaded;
+	// DX (Round 16 F3): compact status mode. Default = full (backward compatible).
+	// details=false gives a tight summary (status, goal, counts, failed/attention
+	// errors) for quick checks without 40 lines of dense key=value noise.
+	const fullDetails = params.details !== false;
 	let asyncLivenessLine: string | undefined;
 	if (manifest.async) {
 		const asyncState = manifest.async;
@@ -110,5 +114,48 @@ export function handleStatus(params: TeamToolParamsValue, ctx: TeamContext): PiT
 		"Recent events:",
 		...(events.length ? events.map((event) => `- ${event.time} ${event.type}${event.taskId ? ` ${event.taskId}` : ""}${event.message ? `: ${event.message}` : ""}`) : ["- (none)"]),
 	];
+	if (!fullDetails) {
+		return result(
+			buildCompactStatus(manifest, tasks, counts, asyncLivenessLine).join("\n"),
+			{ action: "status", status: "ok", runId: manifest.runId, artifactsRoot: manifest.artifactsRoot, intent: `status ${manifest.runId}: ${manifest.status} (compact)` },
+		);
+	}
 	return result(lines.join("\n"), { action: "status", status: "ok", runId: manifest.runId, artifactsRoot: manifest.artifactsRoot, intent: `status ${manifest.runId}: ${manifest.status}` });
+}
+
+/**
+ * Compact status builder (DX: Round 16 F3). A tight summary for quick checks:
+ * identity, status, goal, task counts, and ONLY failed / attention task
+ * errors — not the 40-line dense dump. Invoked when params.details === false.
+ *
+ * Exported for unit testing.
+ */
+export function buildCompactStatus(
+	manifest: { runId: string; team: string; workflow?: string; status: string; goal: string; workspaceMode?: string },
+	tasks: Array<{ id: string; status: string; role: string; agent: string; error?: string }>,
+	counts: Map<string, number>,
+	asyncLivenessLine?: string,
+): string[] {
+	const failedOrAttention = tasks.filter(
+		(t) =>
+			t.status === "failed" ||
+			t.status === "needs_attention" ||
+			t.status === "cancelled",
+	);
+	const lines = [
+		`Run: ${manifest.runId}`,
+		`Team: ${manifest.team}${manifest.workflow ? ` (${manifest.workflow})` : ""}`,
+		`Status: ${manifest.status}`,
+		`Goal: ${manifest.goal}`,
+		...(asyncLivenessLine ? [asyncLivenessLine] : []),
+		`Tasks: ${[...counts.entries()].map(([s, c]) => `${s}=${c}`).join(", ") || "none"}`,
+	];
+	if (failedOrAttention.length > 0) {
+		lines.push("Issues:");
+		for (const t of failedOrAttention) {
+			lines.push(`- ${t.id} [${t.status}] ${t.role}: ${t.error ?? "(no error detail)"}`);
+		}
+	}
+	lines.push("Tip: pass details=true for full output (task graph, agents, effectiveness, events).");
+	return lines;
 }

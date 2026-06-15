@@ -135,6 +135,13 @@ export const TeamToolParams = Type.Object({
 			description: "Run in background when execution support is enabled.",
 		}),
 	),
+	details: Type.Optional(
+		Type.Boolean({
+			default: true,
+			description:
+				"(status) Output detail level. true (default) = full status (task graph, agents, effectiveness, events). false = compact summary (status, goal, task counts, and only failed/attention task errors) for quick checks.",
+		}),
+	),
 	workspaceMode: Type.Optional(
 		Type.Union([Type.Literal("single"), Type.Literal("worktree")], {
 			description:
@@ -318,6 +325,8 @@ export interface TeamToolParamsValue {
 	taskId?: string;
 	message?: string;
 	async?: boolean;
+	/** (status) Output detail level. false = compact summary. Default: true (full). */
+	details?: boolean;
 	workspaceMode?: "single" | "worktree";
 	context?: "fresh" | "fork";
 	cwd?: string;
