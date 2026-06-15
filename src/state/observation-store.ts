@@ -8,10 +8,11 @@
  * Actual capture hooks into the lifecycle events (Pattern 12).
  */
 
-import { mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
+import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { logInternalError } from "../utils/internal-error.ts";
+import { atomicWriteJson } from "./atomic-write.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -153,12 +154,13 @@ export class ObservationStore {
 	 */
 	save(): void {
 		try {
-			// Use path.dirname for cross-platform support (handles both \ and /)
-			mkdirSync(path.dirname(this.storePath), { recursive: true });
-			writeFileSync(this.storePath, JSON.stringify({
+			// BUGFIX (Round 12 I4): use atomicWriteJson (temp-file + rename) instead
+			// of raw writeFileSync, so a crash mid-write cannot leave a truncated /
+			// empty file that breaks load() on restart.
+			atomicWriteJson(this.storePath, {
 				observations: this.observations,
 				compressed: this.compressed,
-			}, null, 2), "utf-8");
+			});
 		} catch (error) {
 			logInternalError("observation-store.save", error, `path=${this.storePath}`);
 		}

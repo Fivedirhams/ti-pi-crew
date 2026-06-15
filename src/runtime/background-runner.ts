@@ -47,6 +47,15 @@ import {
 } from "./runtime-resolver.ts";
 
 /**
+ * Debug logger gated behind PI_CREW_DEBUG env var. Writes to background.log
+ * (console is redirected there). Eliminates log noise in normal operation
+ * while keeping diagnostics available when explicitly enabled.
+ */
+function debugLog(message: string): void {
+	if (process.env.PI_CREW_DEBUG) console.log(message);
+}
+
+/**
  * Heartbeat mechanism: periodically write a heartbeat file so the stale reconciler
  * can distinguish "process died" from "process still alive but quiet".
  * Without this, the reconciler relies solely on process.kill(pid, 0) which can
@@ -222,8 +231,7 @@ function runCleanup(
 	exitDueToRejection: boolean,
 	eventsPath?: string,
 ): void {
-	console.log(
-		`[background-runner] DEBUG: runCleanup, exitDueToRejection=${exitDueToRejection}`,
+	console.log(`[background-runner] runCleanup, exitDueToRejection=${exitDueToRejection}`,
 	);
 	stopInterruptGuard();
 	stopParentGuard();
@@ -492,8 +500,7 @@ async function main(): Promise<void> {
 		runId: manifest.runId,
 		data: { pid: process.pid },
 	});
-	console.log(
-		`[background-runner] DEBUG: async.started written, pid=${process.pid}`,
+	debugLog(`[background-runner] async.started written, pid=${process.pid}`,
 	);
 	writeAsyncStartMarker(manifest, {
 		pid: process.pid,
@@ -505,7 +512,7 @@ async function main(): Promise<void> {
 		manifest.runId,
 	);
 	const stopInterruptGuard = startInterruptGuard(manifest, abortController, stopParentGuard);
-	console.log(`[background-runner] DEBUG: heartbeat+interrupt guard started`);
+	debugLog(`[background-runner] heartbeat+interrupt guard started`);
 	// NOTE: Keep-alive interval is NOT unref'd (unlike heartbeat and interrupt
 	// guard intervals which ARE unref'd). This is intentional — during jiti
 	// compilation of team-runner.ts, the event loop must not drain prematurely.
@@ -514,25 +521,22 @@ async function main(): Promise<void> {
 	const keepAlive = setInterval(() => {}, 5000);
 
 	try {
-		console.log(`[background-runner] DEBUG: about to call discoverAgents`);
+		debugLog(`[background-runner] about to call discoverAgents`);
 		const agents = allAgents(discoverAgents(cwd));
-		console.log(
-			`[background-runner] DEBUG: discoverAgents done, ${agents.length} agents`,
+		debugLog(`[background-runner] discoverAgents done, ${agents.length} agents`,
 		);
 		try { fs.fsyncSync(fs.openSync(manifest.eventsPath, "a")); } catch { /* best-effort */ } // FORCE flush so we see this before death
-		console.log(
-			`[background-runner] DEBUG: calling directTeamAndWorkflowFromRun`,
+		debugLog(`[background-runner] calling directTeamAndWorkflowFromRun`,
 		);
 		const direct = directTeamAndWorkflowFromRun(manifest, tasks, agents);
-		console.log(`[background-runner] DEBUG: direct done, finding team`);
+		debugLog(`[background-runner] direct done, finding team`);
 		const team =
 			direct?.team ??
 			allTeams(discoverTeams(cwd)).find(
 				(candidate) => candidate.name === manifest.team,
 			);
 		if (!team) throw new Error(`Team '${manifest.team}' not found.`);
-		console.log(
-			`[background-runner] DEBUG: team=${team.name}, finding workflow`,
+		debugLog(`[background-runner] team=${team.name}, finding workflow`,
 		);
 		const baseWorkflow =
 			direct?.workflow ??
@@ -541,9 +545,9 @@ async function main(): Promise<void> {
 			);
 		if (!baseWorkflow)
 			throw new Error(`Workflow '${manifest.workflow ?? ""}' not found.`);
-		console.log(`[background-runner] DEBUG: workflow=${baseWorkflow.name}`);
+		debugLog(`[background-runner] workflow=${baseWorkflow.name}`);
 		const workflow = expandParallelResearchWorkflow(baseWorkflow, cwd);
-		console.log(`[background-runner] DEBUG: loading config`);
+		debugLog(`[background-runner] loading config`);
 		const loadedConfig = loadConfig(cwd);
 		const runConfig =
 			manifest.runConfig &&
@@ -597,7 +601,7 @@ async function main(): Promise<void> {
 		// NOTE: abortController is already created above (before heartbeat/interrupt guard start)
 		// so it is available here and its signal is passed through to executeTeamRun → child-pi.
 
-		console.log(`[background-runner] DEBUG: calling executeTeamRun`);
+		debugLog(`[background-runner] calling executeTeamRun`);
 		let result;
 		try {
 			result = await executeTeamRun({
@@ -615,15 +619,12 @@ async function main(): Promise<void> {
 				workspaceId: manifest.ownerSessionId ?? manifest.cwd,
 				signal: abortController.signal,
 			});
-			console.log(
-				`[background-runner] DEBUG: executeTeamRun returned, status=${result.manifest.status}`,
+			console.log(`[background-runner] executeTeamRun returned, status=${result.manifest.status}`,
 			);
 		} catch (execError) {
-			console.log(
-				`[background-runner] DEBUG: executeTeamRun THREW: ${execError instanceof Error ? execError.message : String(execError)}`,
+			console.log(`[background-runner] executeTeamRun THREW: ${execError instanceof Error ? execError.message : String(execError)}`,
 			);
-			console.log(
-				`[background-runner] DEBUG: stack: ${execError instanceof Error ? execError.stack : "N/A"}`,
+			console.log(`[background-runner] stack: ${execError instanceof Error ? execError.stack : "N/A"}`,
 			);
 			throw execError;
 		}
@@ -634,8 +635,7 @@ async function main(): Promise<void> {
 			runId: manifest.runId,
 			data: { status: manifest.status, tasks: tasks.length },
 		});
-		console.log(
-			`[background-runner] DEBUG: async.completed written, status=${manifest.status}`,
+		console.log(`[background-runner] async.completed written, status=${manifest.status}`,
 		);
 		if (
 			manifest.status === "failed" ||
@@ -682,8 +682,7 @@ async function main(): Promise<void> {
 			message,
 		});
 		process.exitCode = 1;
-		console.log(
-			`[background-runner] DEBUG: catch block, error=${error instanceof Error ? error.message : String(error)}`,
+		console.log(`[background-runner] catch block, error=${error instanceof Error ? error.message : String(error)}`,
 		);
 	} finally {
 		// FIX Issue #4: Use shared runCleanup() function for consistent cleanup

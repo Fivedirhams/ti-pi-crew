@@ -113,15 +113,20 @@ export function compactEventLog(eventsPath: string, config?: Partial<RotationCon
 			const missingEvents = kept.filter((e) => e.metadata?.seq === undefined || !afterSeqs.has(e.metadata.seq));
 			let recoveredCount = 0;
 			let recoveryFailed = false;
-			for (const event of missingEvents) {
+			if (missingEvents.length > 0) {
+				// BUGFIX (Round 12 C2): the previous loop called atomicWriteFile PER event,
+				// which REPLACES the entire file each iteration — destroying the
+				// compacted log and all previously-recovered events, leaving only the
+				// LAST missing event. FIX: accumulate all missing events into one
+				// string and append in a single write (appendFileSync appends without
+				// destroying existing content).
+				const recoveryLines = missingEvents.map((e) => JSON.stringify(e) + "\n").join("");
 				try {
-					// Use atomicWriteFile for recovery append too — safer than plain appendFileSync
-					atomicWriteFile(eventsPath, JSON.stringify(event) + "\n");
-					recoveredCount++;
+					fs.appendFileSync(eventsPath, recoveryLines);
+					recoveredCount = missingEvents.length;
 				} catch (err) {
 					recoveryFailed = true;
-					// FIX: Log when recovery append fails to avoid silent event loss
-					logInternalError("event-log-rotation.recovery", err, `eventsPath=${eventsPath} lostEvent=${JSON.stringify(event).slice(0, 100)}`);
+					logInternalError("event-log-rotation.recovery", err, `eventsPath=${eventsPath} lostEvents=${missingEvents.length}`);
 				}
 			}
 			return {
@@ -160,11 +165,15 @@ export function rotateEventLog(eventsPath: string): boolean {
 		try {
 			const ts = new Date().toISOString().replace(/[:.]/g, "-");
 			const archivePath = `${eventsPath}.${ts}.archive.jsonl`;
-			// Step 1: create new empty file at eventsPath FIRST
-			// This ensures eventsPath always exists for readers
-			atomicWriteFile(eventsPath, "");
-			// Step 2: rename old content to archive (after new file is in place)
-			fs.renameSync(eventsPath, archivePath);
+			// BUGFIX (Round 12 C1): the previous order (atomicWriteFile empty THEN
+			// rename) destroyed ALL events — atomicWriteFile replaces the file
+			// in place, so the rename then moved an EMPTY file to the archive.
+			// FIX: copy current content to the archive first (archive is populated,
+			// original still intact), then truncate the original to empty in place.
+			// copyFileSync + writeFileSync("") ensures eventsPath ALWAYS exists
+			// (no missing-file window for concurrent readers).
+			fs.copyFileSync(eventsPath, archivePath);
+			fs.writeFileSync(eventsPath, "", "utf-8");
 			return true;
 		} catch (error) {
 			logInternalError("event-log.rotate", error, `eventsPath=${eventsPath}`);

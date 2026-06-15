@@ -408,10 +408,16 @@ export function appendMailboxMessage(manifest: TeamRunManifest, message: Omit<Ma
 	// 3.3 — rotate mailbox file if it has grown past 10 MB. Cheap stat
 	// check; rotates at most once per append.
 	rotateMailboxFileIfNeeded(mailboxFile(manifest, complete.direction, complete.taskId));
-	const delivery = readDeliveryState(manifest);
-	delivery.messages[complete.id] = complete.status;
-	delivery.updatedAt = createdAt;
-	writeDeliveryState(manifest, delivery);
+	// BUGFIX (Round 12 C3): the delivery.json read-modify-write below was
+	// UNLOCKED, so concurrent appendMailboxMessage calls could interleave and
+	// clobber each other's delivery entries (lost-update race). FIX: wrap the
+	// entire read-modify-write in a file lock on the delivery file.
+	withFileLockSync(deliveryFile(manifest, true), () => {
+		const delivery = readDeliveryState(manifest);
+		delivery.messages[complete.id] = complete.status;
+		delivery.updatedAt = createdAt;
+		writeDeliveryState(manifest, delivery);
+	});
 	return complete;
 }
 
@@ -437,12 +443,16 @@ export function readMailboxMessage(manifest: TeamRunManifest, messageId: string)
 }
 
 export function acknowledgeMailboxMessage(manifest: TeamRunManifest, messageId: string): MailboxDeliveryState {
-	const delivery = readDeliveryState(manifest);
-	if (!delivery.messages[messageId]) throw new Error(`Mailbox message '${messageId}' not found.`);
-	delivery.messages[messageId] = "acknowledged";
-	delivery.updatedAt = new Date().toISOString();
-	writeDeliveryState(manifest, delivery);
-	return delivery;
+	// BUGFIX (Round 12 I6): unlocked read-modify-write on delivery.json could
+	// clobber concurrent appends. FIX: wrap in a file lock.
+	return withFileLockSync(deliveryFile(manifest, true), () => {
+		const delivery = readDeliveryState(manifest);
+		if (!delivery.messages[messageId]) throw new Error(`Mailbox message '${messageId}' not found.`);
+		delivery.messages[messageId] = "acknowledged";
+		delivery.updatedAt = new Date().toISOString();
+		writeDeliveryState(manifest, delivery);
+		return delivery;
+	});
 }
 
 /**
@@ -503,14 +513,18 @@ export function updateMailboxMessageReply(manifest: TeamRunManifest, originalMes
 }
 
 export function replayPendingMailboxMessages(manifest: TeamRunManifest): MailboxReplayResult {
-	const delivery = readDeliveryState(manifest);
-	const pending = readAllInboxMessages(manifest).filter((message) => message.status !== "acknowledged" && delivery.messages[message.id] !== "acknowledged");
-	if (!pending.length) return { messages: [], updatedAt: delivery.updatedAt };
-	const updatedAt = new Date().toISOString();
-	for (const message of pending) delivery.messages[message.id] = "delivered";
-	delivery.updatedAt = updatedAt;
-	writeDeliveryState(manifest, delivery);
-	return { messages: pending, updatedAt };
+	// BUGFIX (Round 12 I6): unlocked read-modify-write on delivery.json could
+	// clobber concurrent appends/acknowledgments. FIX: wrap in a file lock.
+	return withFileLockSync(deliveryFile(manifest, true), () => {
+		const delivery = readDeliveryState(manifest);
+		const pending = readAllInboxMessages(manifest).filter((message) => message.status !== "acknowledged" && delivery.messages[message.id] !== "acknowledged");
+		if (!pending.length) return { messages: [], updatedAt: delivery.updatedAt };
+		const updatedAt = new Date().toISOString();
+		for (const message of pending) delivery.messages[message.id] = "delivered";
+		delivery.updatedAt = updatedAt;
+		writeDeliveryState(manifest, delivery);
+		return { messages: pending, updatedAt };
+	});
 }
 
 export function validateMailbox(manifest: TeamRunManifest, options: { repair?: boolean; signal?: AbortSignal } = {}): MailboxValidationReport {
