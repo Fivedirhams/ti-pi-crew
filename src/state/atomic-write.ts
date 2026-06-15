@@ -284,18 +284,19 @@ export const __test__renameWithRetryAsync = renameWithRetryAsync;
 
 export function atomicWriteFile(filePath: string, content: string, expectedHash?: string): void {
 	if (!isSymlinkSafePath(filePath)) throw new Error(`Refusing to write: target is a symlink or inside untrusted directory: ${filePath}`);
-	// On Windows, resolve parent dir through realpath to handle short-name
-	// vs long-name path alias (e.g. RUNNER~1 vs runneradmin). Without this,
-	// mkdirSync may succeed but openSync fails with ENOENT because the OS
-	// sees the paths as different locations.
+	// On Windows the parent directory may be referenced via a short-name alias
+	// (e.g. RUNNER~1 vs runneradmin). mkdirSync on one form can succeed while
+	// openSync on another form fails with ENOENT. We therefore ensure the dir
+	// exists, trying the canonical (realpathSync.native) form as a fallback on
+	// EPERM.
 	//
-	// IMPORTANT: use realpathSync.NATIVE (Win32 GetFinalPathNameByHandle) and
-	// strip the \?\\\\-prefix, matching canonicalizePath() in paths.ts. The
-	// libuv binding (fs.realpathSync) can return a different short/long-name
-	// form than .native, which causes the written file to land on a path that
-	// diverges from the caller's path (built via canonicalizePath). This made
-	// existsSync(callerPath) return false after a successful write under
-	// concurrency on Windows CI (intermittent state-store test failures).
+	// CRITICAL: we NEVER rewrite `filePath`. The caller (e.g. createRunManifest)
+	// builds filePath via canonicalizePath() (realpathSync.native) and will later
+	// stat/read it back at that exact path. If we rewrote filePath to a different
+	// realpath form here, the written file would land on a path that diverges
+	// from the caller's path — making existsSync/readFileSync(callerPath) fail
+	// with ENOENT even though the write "succeeded". Writing to the original
+	// filePath guarantees the caller can always find the file it just wrote.
 	const canonicalize = (p: string): string => {
 		try {
 			const r = fs.realpathSync.native(p);
@@ -304,21 +305,15 @@ export function atomicWriteFile(filePath: string, content: string, expectedHash?
 			try { return fs.realpathSync(p); } catch { return p; }
 		}
 	};
-	let dirPath = path.dirname(filePath);
-	if (process.platform === "win32") {
-		const realDir = canonicalize(dirPath);
-		if (realDir !== dirPath) dirPath = realDir;
-		filePath = path.join(dirPath, path.basename(filePath));
-	}
+	const dirPath = path.dirname(filePath);
 	try {
 		fs.mkdirSync(dirPath, { recursive: true });
 	} catch (error) {
 		if (process.platform === "win32" && (error as NodeJS.ErrnoException).code === "EPERM") {
+			// mkdir hit a short/long-name alias wall — retry with the canonical
+		// form. The write itself still targets the original filePath below.
 			const realDir = canonicalize(dirPath);
-			if (realDir !== dirPath) {
-				fs.mkdirSync(realDir, { recursive: true });
-				dirPath = realDir;
-			}
+			if (realDir !== dirPath) fs.mkdirSync(realDir, { recursive: true });
 		} else {
 			throw error;
 		}
