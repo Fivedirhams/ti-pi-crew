@@ -63,9 +63,9 @@ Supported fields:
     "deadletterThreshold": 3,
     "retryPolicy": {
       "maxAttempts": 3,
-      "initialDelayMs": 1000,
-      "backoffMultiplier": 2,
-      "maxDelayMs": 30000
+      "backoffMs": 1000,
+      "jitterRatio": 0.3,
+      "exponentialFactor": 2
     }
   }
 }

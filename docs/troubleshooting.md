@@ -109,15 +109,15 @@ code + a help hint inline. Common ones:
 
 | Code | Name | Meaning | First check |
 |------|------|---------|-------------|
-| E001 | StateCorrupt | tasks/manifest JSON unreadable | `team action='doctor'`; may need `cleanup` |
-| E002 | FileWrite | atomic write failed (perms/disk) | check disk space + dir perms |
-| E003 | PathEscape | path-traversal attempt blocked | use a valid `runId` (alnum/`_-` only) |
-| E004 | MailboxError | mailbox delivery failed | check `delivery.json` / run `cleanup` |
-| E005 | LockTimeout | file lock held too long | another run may be writing; retry |
-| E006 | InvalidConfig | config failed validation | `team action='config'` shows the field |
-| E007 | ChildTimeout | a worker Pi didn't finish in time | raise `runtime.taskTimeoutMs` or simplify the task |
+| E001 | FileReadError | a required file couldn't be read | check the file exists + read perms; may need `cleanup` |
+| E002 | FileWriteError | an atomic write failed | check disk space + dir write perms |
+| E003 | TaskNotFound | a referenced task id doesn't exist | `team status` to verify the run's tasks |
+| E004 | InvalidStatusTransition | illegal run/task status change | verify status via `team status` before retrying |
+| E005 | ConfigError | config has a syntax/type error | `team config` shows the offending field |
+| E006 | ResourceNotFound | agent/team/workflow not found | `team list` to see available resources |
+| E007 | ChildTimeout | a worker Pi didn't finish in time | raise `runtime.responseTimeoutMs` or simplify the task |
 | E008 | ModelExhausted | all fallback models failed | see "Model fallback exhausted" above |
-| E009 | PreStepFailed | a workflow pre-step hook failed | check the hook output in events |
+| E009 | PreStepFailed | a workflow pre-step hook failed | check the hook stderr in events; or set `preStepOptional` |
 | E010 | EventLogLockTimeout | event log locked under contention | transient; retry, or lower concurrency |
 | E011 | DepthLimitExceeded | crew nesting too deep | raise `crew.maxDepth` or flatten the call |
 | E012 | RunStale | run reconciled as stale | see "Stale async process" above |

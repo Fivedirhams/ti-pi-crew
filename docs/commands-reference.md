@@ -188,13 +188,13 @@ Giữ lại 20 runs gần nhất, xóa phần còn lại.
 | `runtime.groupJoinAckTimeoutMs` | number | `300000` | Group join ack timeout (ms) |
 | `runtime.requirePlanApproval` | boolean | `false` | Yêu cầu approve plan trước execute |
 | `runtime.completionMutationGuard` | string | `"warn"` | `off`, `warn`, `fail` |
-| `limits.maxConcurrentWorkers` | number | — | Max workers chạy song song |
-| `limits.maxTaskDepth` | number | `2` | Max task tree depth |
-| `limits.maxChildrenPerTask` | number | `5` | Max children per task |
-| `limits.maxRunMinutes` | number | `60` | Max run duration (phút) |
-| `limits.maxRetriesPerTask` | number | `1` | Max retries per task |
-| `limits.maxTasksPerRun` | number | — | Max tasks per run |
-| `limits.heartbeatStaleMs` | number | `60000` | Heartbeat stale threshold |
+| `limits.maxConcurrentWorkers` | number | `1024` | Max workers chạy song song |
+| `limits.maxTaskDepth` | number | `100` | Max task tree depth |
+| `limits.maxChildrenPerTask` | number | — | Max children per task |
+| `limits.maxRunMinutes` | number | `1440` | Max run duration (phút) |
+| `limits.maxRetriesPerTask` | number | `100` | Max retries per task |
+| `limits.maxTasksPerRun` | number | `10000` | Max tasks per run |
+| `limits.heartbeatStaleMs` | number | `86400000` | Heartbeat stale threshold |
 | `control.enabled` | boolean | — | Enable agent control-plane |
 | `control.needsAttentionAfterMs` | number | — | Attention timeout |
 | `autonomous.profile` | string | `"suggested"` | `manual`, `suggested`, `assisted`, `aggressive` |
@@ -205,9 +205,13 @@ Giữ lại 20 runs gần nhất, xóa phần còn lại.
 | `tools.enableSteer` | boolean | `true` | Enable steer tool |
 | `tools.terminateOnForeground` | boolean | `false` | Return terminate từ foreground Agent |
 | `agents.disableBuiltins` | boolean | `false` | Disable builtin agents |
-| `observability.prometheus.enabled` | boolean | `false` | Enable Prometheus exporter |
-| `observability.otlp.enabled` | boolean | `false` | Enable OTLP exporter |
-| `worktree.enabled` | boolean | — | Enable worktree isolation |
+| `observability.enabled` | boolean | `false` | Enable metrics collection |
+| `observability.pollIntervalMs` | number | — | Metrics poll interval |
+| `otlp.enabled` | boolean | `false` | Enable OTLP exporter |
+| `otlp.endpoint` | string | — | OTLP endpoint URL |
+| `worktree.setupHook` | string | — | Worktree setup hook command |
+| `worktree.linkNodeModules` | boolean | — | Symlink node_modules into worktree |
+| `worktree.seedPaths` | array | — | Extra paths to seed into worktree |
 
 ---
 

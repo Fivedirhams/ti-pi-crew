@@ -210,35 +210,17 @@ describe("reconcileStaleRun", () => {
 
 describe("reconcileOrphanedTempWorkspaces", () => {
 	const tempDirs: string[] = [];
+	// Round 19: per-test ISOLATED tmp dir. reconcileOrphanedTempWorkspaces
+	// scans os.tmpdir() for 'pi-crew-*' dirs but caps the scan at
+	// ORPHAN_TEMP_SCAN_BATCH_SIZE=50 (sorted alphabetically). Leftover dirs
+	// from other tests/runs pushed our workspace past the cap → repaired=0.
+	// Fix: create a fresh isolated dir per test (simulating /tmp but containing
+	// ONLY this test's workspaces) and inject it via the tmpDir option.
+	let isolatedTmp: string;
 
 	beforeEach(() => {
-		// Clean up any existing pi-crew-test-* dirs (THIS test's own prefix only)
-		// in /tmp so the test workspace falls within the
-		// ORPHAN_TEMP_SCAN_BATCH_SIZE=50 limit. Without this, hundreds of orphaned
-		// dirs from past test runs push the test workspace beyond the batch
-		// window, causing repaired=0.
-		//
-		// Round 19 fix: previously this wiped ALL pi-crew-* dirs, which destroyed
-		// temp dirs belonging to CONCURRENTLY-running test files (node:test runs
-		// files concurrently in one process) → cross-file interference / flakes.
-		// Now scoped to our own 'pi-crew-test-' prefix only.
-		try {
-			const entries = fs.readdirSync(os.tmpdir(), { withFileTypes: true });
-			for (const entry of entries) {
-				if (entry.isDirectory() && entry.name.startsWith("pi-crew-test-")) {
-					try {
-						fs.rmSync(path.join(os.tmpdir(), entry.name), {
-							recursive: true,
-							force: true,
-						});
-					} catch {
-						/* ignore — best-effort cleanup */
-					}
-				}
-			}
-		} catch {
-			/* ignore */
-		}
+		isolatedTmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-isotmp-"));
+		tempDirs.push(isolatedTmp);
 	});
 
 	afterEach(() => {
@@ -258,7 +240,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 		/** If true, set the dir mtime to 2 hours ago. Default: true. */
 		old?: boolean;
 	}): string {
-		const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-crew-test-"));
+		const wsDir = fs.mkdtempSync(path.join(isolatedTmp, "pi-crew-test-"));
 		tempDirs.push(wsDir);
 		const runId = `test_run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		const runDir = path.join(wsDir, ".crew", "state", "runs", runId);
@@ -329,6 +311,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 		const now = Date.now();
 
 		const result = reconcileOrphanedTempWorkspaces(now, {
+			tmpDir: isolatedTmp,
 			cleanupOrphanedTempDirs: true,
 		});
 
@@ -351,6 +334,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 		const now = Date.now();
 
 		const result = reconcileOrphanedTempWorkspaces(now, {
+			tmpDir: isolatedTmp,
 			cleanupOrphanedTempDirs: true,
 		});
 
@@ -373,6 +357,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 		const now = Date.now();
 
 		const result = reconcileOrphanedTempWorkspaces(now, {
+			tmpDir: isolatedTmp,
 			cleanupOrphanedTempDirs: false,
 		});
 
@@ -395,6 +380,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 		const now = Date.now();
 
 		const result = reconcileOrphanedTempWorkspaces(now, {
+			tmpDir: isolatedTmp,
 			cleanupOrphanedTempDirs: true,
 		});
 
@@ -427,6 +413,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 
 		const now = Date.now();
 		const result = reconcileOrphanedTempWorkspaces(now, {
+			tmpDir: isolatedTmp,
 			cleanupOrphanedTempDirs: true,
 		});
 
@@ -443,7 +430,7 @@ describe("reconcileOrphanedTempWorkspaces", () => {
 		});
 		const now = Date.now();
 
-		const result = reconcileOrphanedTempWorkspaces(now);
+		const result = reconcileOrphanedTempWorkspaces(now, { tmpDir: isolatedTmp });
 
 		assert.equal(result.repaired, 0);
 		assert.ok(

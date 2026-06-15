@@ -231,20 +231,19 @@ If preconditions are not met, a friendly error message is returned instead of cr
 
 | Scope | Path |
 |-------|------|
-| User | `~/.pi/agent/extensions/pi-crew/config.json` |
-| Project (new) | `.crew/config.json` |
-| Project (legacy) | `.pi/teams/config.json` |
+| User (primary) | `~/.pi/agent/pi-crew.json` |
+| User (legacy, still read for migration) | `~/.pi/agent/extensions/pi-crew/config.json` |
+| Project (crewRoot) | `.crew/config.json` (or `.pi/teams/config.json` legacy) |
+| Project (alt) | `.pi/pi-crew.json` |
 
 ### Quick Config
 
 ```text
 /team-config                           # view all settings
-/team-config get runtime.mode            # read one key
-/team-config set runtime.mode=scaffold  # scaffold mode
-/team-config set asyncByDefault=true    # async by default
-/team-config unset runtime.mode          # reset to default
-/team-config --project                  # project scope
-/team-settings path                     # show config file path
+/team-config runtime.mode=scaffold    # set a key (--project for project scope)
+/team-config --unset=runtime.mode     # reset a key to default
+/team-config --project runtime.mode   # project-scoped view
+/team-settings path                   # show config file path
 ```
 
 ### Key Settings
@@ -262,8 +261,8 @@ If preconditions are not met, a friendly error message is returned instead of cr
 | **UI** | `widgetPlacement`, `dashboardPlacement` | compact widget |
 | | `showModel`, `showTokens` | display controls |
 | **Reliability** | `autoRetry`, `autoRecover`, `deadletterThreshold` | opt-in |
-| **Observability** | `prometheus.enabled`, `otlp.enabled`, `heartbeatStaleMs` | opt-in |
-| **Worktree** | `worktree.enabled` | disabled by default |
+| **Observability** | `observability.enabled`, `observability.pollIntervalMs`, `otlp.enabled`/`otlp.endpoint` | opt-in |
+| **Worktree** | `worktree.setupHook`, `worktree.linkNodeModules`, `worktree.seedPaths` (mode is set via `workspaceMode: "worktree"` at run time) | disabled by default |
 
 > ⚠️ **Trust boundary**: project config cannot override sensitive execution controls (workers, runtime mode, autonomy, agent overrides). Set those in **user config** only.
 

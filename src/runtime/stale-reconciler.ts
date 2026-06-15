@@ -485,9 +485,13 @@ export interface OrphanReconcileResult {
  */
 export function reconcileOrphanedTempWorkspaces(
 	now = Date.now(),
-	options?: { cleanupOrphanedTempDirs?: boolean },
+	options?: { cleanupOrphanedTempDirs?: boolean; tmpDir?: string; scanBatchSize?: number },
 ): OrphanReconcileResult {
-	const tmpDir = getSafeTempDir();
+	// Injectable tmpDir + scanBatchSize for deterministic unit testing
+	// (Round 19: tests must not depend on global /tmp cleanliness; the
+	// production ORPHAN_TEMP_SCAN_BATCH_SIZE cap could exclude a test's dir
+	// when leftover dirs accumulate). Defaults remain os.tmpdir() + the cap.
+	const tmpDir = options?.tmpDir ?? getSafeTempDir();
 	if (!tmpDir) return { repaired: 0, cleanedDirs: 0 };
 	let repaired = 0;
 	let cleanedDirs = 0;
@@ -496,10 +500,11 @@ export function reconcileOrphanedTempWorkspaces(
 		// Sort for deterministic order; cap to ORPHAN_TEMP_SCAN_BATCH_SIZE per
 		// tick to avoid main-thread stalls when /tmp has thousands of
 		// pi-crew-* dirs from past interrupted test runs.
+		const scanBatch = options?.scanBatchSize ?? ORPHAN_TEMP_SCAN_BATCH_SIZE;
 		const candidates = entries
 			.filter((e) => e.isDirectory() && e.name.startsWith("pi-crew-"))
 			.sort((a, b) => a.name.localeCompare(b.name))
-			.slice(0, ORPHAN_TEMP_SCAN_BATCH_SIZE);
+			.slice(0, scanBatch);
 		for (const entry of candidates) {
 			if (!entry.isDirectory() || !entry.name.startsWith("pi-crew-"))
 				continue;
