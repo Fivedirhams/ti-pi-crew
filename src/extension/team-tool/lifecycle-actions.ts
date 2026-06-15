@@ -9,6 +9,7 @@ import { importRunBundle } from "../run-import.ts";
 import { pruneFinishedRuns } from "../run-maintenance.ts";
 import type { PiTeamsToolResult } from "../tool-result.ts";
 import { configRecord, result, type TeamContext } from "./context.ts";
+import { RUN_NOT_FOUND_HINT } from "./run-not-found.ts";
 import { enforceDestructiveIntent, intentFromConfig } from "./intent-policy.ts";
 import { executeHook, appendHookEvent } from "../../hooks/registry.ts";
 import { resolveRealContainedPath } from "../../utils/safe-paths.ts";
@@ -18,7 +19,7 @@ import * as path from "node:path";
 export function handleWorktrees(params: TeamToolParamsValue, ctx: TeamContext): PiTeamsToolResult {
 	if (!params.runId) return result("Worktrees requires runId.", { action: "worktrees", status: "error" }, true);
 	const loaded = loadRunManifestById(ctx.cwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "worktrees", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "worktrees", status: "error" }, true);
 	const withWorktrees = loaded.tasks.filter((task) => task.worktree);
 	const lines = [`Worktrees for ${loaded.manifest.runId}:`, ...(withWorktrees.length ? withWorktrees.map((task) => `- ${task.id}: ${task.worktree!.path} branch=${task.worktree!.branch} reused=${task.worktree!.reused ? "true" : "false"}`) : ["- (none)"])];
 	return result(lines.join("\n"), { action: "worktrees", status: "ok", runId: loaded.manifest.runId, artifactsRoot: loaded.manifest.artifactsRoot });
@@ -47,7 +48,7 @@ export function handleImport(params: TeamToolParamsValue, ctx: TeamContext): PiT
 export async function handleExport(params: TeamToolParamsValue, ctx: TeamContext): Promise<PiTeamsToolResult> {
 	if (!params.runId) return result("Export requires runId.", { action: "export", status: "error" }, true);
 	const loaded = loadRunManifestById(ctx.cwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "export", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "export", status: "error" }, true);
 
 	// SECURITY: Ownership check — only the owner session may export a run.
 	// Foreign-run export requires confirm: true (explicit user intent).
@@ -96,7 +97,7 @@ export async function handleForget(params: TeamToolParamsValue, ctx: TeamContext
 	if (!params.runId) return result("Forget requires runId.", { action: "forget", status: "error" }, true);
 	if (!params.confirm) return result("forget requires confirm: true.", { action: "forget", status: "error" }, true);
 	const loaded = loadRunManifestById(ctx.cwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "forget", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "forget", status: "error" }, true);
 
 	// Ownership check — prevent cross-session deletion unless force is set
 	const foreignRun = typeof loaded.manifest.ownerSessionId === "string" && loaded.manifest.ownerSessionId !== ctx.sessionId;
@@ -126,7 +127,7 @@ export async function handleCleanup(params: TeamToolParamsValue, ctx: TeamContex
 	if (intentError) return intentError;
 	if (!params.runId) return result("Cleanup requires runId.", { action: "cleanup", status: "error" }, true);
 	const loaded = loadRunManifestById(ctx.cwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "cleanup", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "cleanup", status: "error" }, true);
 
 	// Ownership check — prevent cross-session worktree cleanup unless force is set
 	const foreignRun = typeof loaded.manifest.ownerSessionId === "string" && loaded.manifest.ownerSessionId !== ctx.sessionId;

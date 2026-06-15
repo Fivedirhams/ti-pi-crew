@@ -5,13 +5,14 @@ import { aggregateUsage, formatUsage, formatCostReport } from "../../state/usage
 import type { PiTeamsToolResult } from "../tool-result.ts";
 import { locateRunCwd } from "../team-tool.ts";
 import { result, type TeamContext } from "./context.ts";
+import { RUN_NOT_FOUND_HINT } from "./run-not-found.ts";
 
 export function handleEvents(params: TeamToolParamsValue, ctx: TeamContext): PiTeamsToolResult {
 	if (!params.runId) return result("Events requires runId.", { action: "events", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
-	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "events", status: "error" }, true);
+	if (!runCwd) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "events", status: "error" }, true);
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "events", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "events", status: "error" }, true);
 	const events = readEvents(loaded.manifest.eventsPath);
 	const lines = [`Events for ${loaded.manifest.runId}:`, ...(events.length ? events.map((event) => `${event.time} ${event.type}${event.taskId ? ` ${event.taskId}` : ""}${event.message ? `: ${event.message}` : ""}${event.data ? ` ${JSON.stringify(event.data)}` : ""}`) : ["(none)"])];
 	return result(lines.join("\n"), { action: "events", status: "ok", runId: loaded.manifest.runId, artifactsRoot: loaded.manifest.artifactsRoot });
@@ -20,9 +21,9 @@ export function handleEvents(params: TeamToolParamsValue, ctx: TeamContext): PiT
 export function handleArtifacts(params: TeamToolParamsValue, ctx: TeamContext): PiTeamsToolResult {
 	if (!params.runId) return result("Artifacts requires runId.", { action: "artifacts", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
-	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "artifacts", status: "error" }, true);
+	if (!runCwd) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "artifacts", status: "error" }, true);
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "artifacts", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "artifacts", status: "error" }, true);
 	const lines = [`Artifacts for ${loaded.manifest.runId}:`, ...(loaded.manifest.artifacts.length ? loaded.manifest.artifacts.map((artifact) => `- ${artifact.kind}: ${artifact.path}${artifact.sizeBytes !== undefined ? ` (${artifact.sizeBytes} bytes)` : ""}${artifact.contentHash ? ` sha256=${artifact.contentHash.slice(0, 12)}` : ""}`) : ["- (none)"])];
 	return result(lines.join("\n"), { action: "artifacts", status: "ok", runId: loaded.manifest.runId, artifactsRoot: loaded.manifest.artifactsRoot });
 }
@@ -30,9 +31,9 @@ export function handleArtifacts(params: TeamToolParamsValue, ctx: TeamContext): 
 export function handleSummary(params: TeamToolParamsValue, ctx: TeamContext): PiTeamsToolResult {
 	if (!params.runId) return result("Summary requires runId.", { action: "summary", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
-	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "summary", status: "error" }, true);
+	if (!runCwd) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "summary", status: "error" }, true);
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "summary", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "summary", status: "error" }, true);
 	const usage = aggregateUsage(loaded.tasks);
 	const lines = [
 		`Summary for ${loaded.manifest.runId}`,

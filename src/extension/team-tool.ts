@@ -156,6 +156,7 @@ import { handleParallel } from "./team-tool/parallel-dispatch.ts";
 import { handlePlan } from "./team-tool/plan.ts";
 import { handleRespond } from "./team-tool/respond.ts";
 import { handleStatus } from "./team-tool/status.ts";
+import { RUN_NOT_FOUND_HINT } from "./team-tool/run-not-found.ts";
 import { formatActionSuggestion } from "./action-suggestions.ts";
 
 export { handleApi } from "./team-tool/api.ts";
@@ -460,14 +461,14 @@ export async function handleResume(
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
 	if (!runCwd)
 		return result(
-			`Run '${params.runId}' not found.`,
+			`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`,
 			{ action: "resume", status: "error" },
 			true,
 		);
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
 	if (!loaded)
 		return result(
-			`Run '${params.runId}' not found.`,
+			`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`,
 			{ action: "resume", status: "error" },
 			true,
 		);

@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { RUN_NOT_FOUND_HINT } from "./run-not-found.ts";
 import * as path from "node:path";
 import { loadRunManifestById } from "../../state/state-store.ts";
 import type { TeamRunManifest, TeamTaskState } from "../../state/types.ts";
@@ -211,7 +212,7 @@ export function handleExplain(params: {
 
   const loaded = loadRunManifestById(cwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
   if (!loaded) {
-    return result(`Run '${params.runId}' not found.`, { action: "explain", status: "error" }, true);
+    return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "explain", status: "error" }, true);
   }
 
   const { manifest, tasks } = loaded;

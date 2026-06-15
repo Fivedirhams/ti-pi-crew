@@ -12,6 +12,7 @@ import { executeHook, appendHookEvent } from "../../hooks/registry.ts";
 import type { PiTeamsToolResult } from "../tool-result.ts";
 import { locateRunCwd } from "../team-tool.ts";
 import { result, type TeamContext } from "./context.ts";
+import { RUN_NOT_FOUND_HINT } from "./run-not-found.ts";
 import { enforceDestructiveIntent, intentFromConfig } from "./intent-policy.ts";
 import { invalidateSnapshot, type CacheControlDeps } from "./cache-control.ts";
 
@@ -80,9 +81,9 @@ function cancelReasonFromParams(params: TeamToolParamsValue): CancellationReason
 export async function handleRetry(params: TeamToolParamsValue, ctx: TeamContext, deps?: CacheControlDeps): Promise<PiTeamsToolResult> {
 	if (!params.runId) return result("Retry requires runId.", { action: "retry", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
-	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "retry", status: "error" }, true);
+	if (!runCwd) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "retry", status: "error" }, true);
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "retry", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "retry", status: "error" }, true);
 
 	// Pre-lock ownership check: reject foreign-owned runs unless force is set
 	const foreignRun = typeof loaded.manifest.ownerSessionId === "string" && loaded.manifest.ownerSessionId !== ctx.sessionId;
@@ -145,9 +146,9 @@ export async function handleCancel(params: TeamToolParamsValue, ctx: TeamContext
 	if (intentError) return intentError;
 	if (!params.runId) return result("Cancel requires runId.", { action: "cancel", status: "error" }, true);
 	const runCwd = locateRunCwd(params.runId, ctx.cwd);
-	if (!runCwd) return result(`Run '${params.runId}' not found.`, { action: "cancel", status: "error" }, true);
+	if (!runCwd) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "cancel", status: "error" }, true);
 	const loaded = loadRunManifestById(runCwd, params.runId); // NOTE: no withRunLock - best-effort only; concurrent writes may cause inconsistency
-	if (!loaded) return result(`Run '${params.runId}' not found.`, { action: "cancel", status: "error" }, true);
+	if (!loaded) return result(`Run '${params.runId}' not found.${RUN_NOT_FOUND_HINT}`, { action: "cancel", status: "error" }, true);
 
 	// Pre-lock ownership check: reject foreign-owned runs unless force is set
 	const preCheck = abortOwned(loaded.manifest.runId, undefined, ctx, params.force);

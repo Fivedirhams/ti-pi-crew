@@ -13,7 +13,7 @@
  * avoids pulling the schema into low-level error paths.
  */
 
-import { suggestConfigKey } from "../config/suggestions.ts";
+import { findClosestKey } from "../config/suggestions.ts";
 
 /**
  * The complete set of valid top-level `team` actions (mirrors the action enum
@@ -46,7 +46,7 @@ export const KNOWN_TEAM_ACTIONS = [
 export function suggestAction(input: string): string | null {
 	const trimmed = input.trim();
 	if (!trimmed) return null;
-	return suggestConfigKey(trimmed, KNOWN_TEAM_ACTIONS, 2);
+	return findClosestKey(trimmed, KNOWN_TEAM_ACTIONS, 2);
 }
 
 /**
