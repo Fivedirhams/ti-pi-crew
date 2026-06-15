@@ -101,7 +101,6 @@ import {
 import { createJsonlSink, type NotificationSink } from "./notification-sink.ts";
 import { runArtifactCleanup } from "./registration/artifact-cleanup.ts";
 import { registerTeamCommands } from "./registration/commands.ts";
-import { registerBriefToolOverrides } from "./registration/brief-tool-overrides.ts";
 import { registerCompactionGuard } from "./registration/compaction-guard.ts";
 import {
 	__test__subagentSpawnParams,
@@ -1990,11 +1989,6 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 
 	registerCleanupHandler(pi);
 
-	// Brief tool overrides DISABLED: re-registering built-in tools replaced Pi's
-	// superior native renderers (syntax highlighting, diff views, full file
-	// content) with inferior custom ones, and caused renderCall/renderResult
-	// to duplicate path/command info. Pi's native rendering is better.
-	// To re-enable, uncomment: registerBriefToolOverrides(pi, process.cwd());
 
 	// Resilient edit (Phase 2): OPT-IN via CREW_RESILIENT_EDIT=1.
 	// Wraps the native edit tool with the cascading replace() fallback so that
