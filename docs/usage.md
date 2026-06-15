@@ -5,8 +5,13 @@
 Optional config path:
 
 ```text
-~/.pi/agent/extensions/pi-crew/config.json
+~/.pi/agent/pi-crew.json
 ```
+
+A **legacy** path `~/.pi/agent/extensions/pi-crew/config.json` is also read for
+backward-compatibility migration — values there are merged but the new path
+above is preferred. A project-local config may also live at `.pi/pi-crew.json`
+in your repo root (project values are merged under the user config).
 
 Create a default config:
 

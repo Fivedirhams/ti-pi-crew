@@ -515,6 +515,7 @@ Stats: **366 source files** (70K lines) · **506 test files** (66K lines) · **4
 | [docs/commands-reference.md](docs/commands-reference.md) | Slash commands + `/team-api` |
 | [docs/resource-formats.md](docs/resource-formats.md) | Agent/team/workflow file formats |
 | [docs/usage.md](docs/usage.md) | Usage patterns + config examples |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Common errors, recovery, and error-code reference (E001–E012) |
 | [docs/architecture.md](docs/architecture.md) | Internal architecture + run flow |
 | [docs/runtime-flow.md](docs/runtime-flow.md) | Runtime execution details |
 | [docs/live-mailbox-runtime.md](docs/live-mailbox-runtime.md) | Mailbox + live-session runtime |
