@@ -529,3 +529,4 @@ Research docs (not in package): [`docs/pi-crew-research/`](https://github.com/ba
 ## Acknowledgements
 
 `pi-crew` builds on ideas and selected MIT-licensed implementation patterns from `pi-subagents` and `oh-my-claudecode`, with conceptual inspiration from `oh-my-openagent`.
+# test
