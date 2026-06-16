@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { readEvents } from "./event-log.ts";
+import { readEvents, type TeamEvent } from "./event-log.ts";
 import { atomicWriteFile } from "./atomic-write.ts";
 import { logInternalError } from "../utils/internal-error.ts";
 import { withEventLogLockSync } from "./event-log.ts";
@@ -65,6 +65,25 @@ export interface CompactionResult {
  * 6. Return compaction stats
  */
 export function compactEventLog(eventsPath: string, config?: Partial<RotationConfig>): CompactionResult | undefined {
+	const prepared = prepareCompaction(eventsPath, config);
+	if (!prepared) return undefined;
+	// FIX: Wrap entire read-compact-write-recover sequence in lock to prevent
+	// event loss during compaction. Without lock, events can be appended between
+	// read and write, lost silently.
+	//
+	// NOTE (Round 24 BUG 1): callers ALREADY holding the event-log lock (e.g.
+	// appendEventInsideLock in event-log.ts) must call applyCompactionUnlocked
+	// directly — calling compactEventLog from inside the lock deadlocks (the
+	// mkdir lock is not re-entrant → 5s timeout → compaction never ran → the
+	// log grew unbounded until events were silently dropped past 50MB).
+	return withEventLogLockSync(eventsPath, () => applyCompactionUnlocked(eventsPath, prepared));
+}
+
+/** Round 24 (BUG 1): the lock-free pre-read for compaction. Safe to run
+ * outside the lock (read-only). Returns the compacted lines + stats needed
+ * for the write phase. */
+export function prepareCompaction(eventsPath: string, config?: Partial<RotationConfig>):
+	{ lines: string; originalSize: number; originalCount: number; kept: TeamEvent[] } | undefined {
 	if (!fs.existsSync(eventsPath)) return undefined;
 	const cfg = resolveConfig(config);
 	let originalSize: number;
@@ -74,79 +93,73 @@ export function compactEventLog(eventsPath: string, config?: Partial<RotationCon
 	if (originalCount <= cfg.compactToCount) return undefined;
 	const kept = allEvents.slice(-cfg.compactToCount);
 	const lines = kept.map((e) => JSON.stringify(e)).join("\n") + "\n";
+	return { lines, originalSize, originalCount, kept };
+}
 
-	// FIX: Wrap entire read-compact-write-recover sequence in lock to prevent
-	// event loss during compaction. Without lock, events can be appended between
-	// read and write, lost silently.
-	return withEventLogLockSync(eventsPath, () => {
-		try {
-			atomicWriteFile(eventsPath, lines);
-		} catch (err) {
-			// Concurrent write conflict — skip compaction this cycle
-			logInternalError("event-log-rotation.compact", err, `eventsPath=${eventsPath}`);
-			return undefined;
-		}
-		// C2: Re-read to recover any events appended during the compaction window.
-			// Events appended during the compaction window are preserved because they
-			// appear in afterWrite and the condition afterWrite.length >= kept.length is
-			// true, so they are included in the return stats without entering the
-			// recovery branch.
-		try {
-			const afterWrite = readEvents(eventsPath);
-			// FIX: Check if events were actually lost (afterWrite.length < kept.length)
-			// rather than using appendedDuringWindow >= 0 which is always true.
-			// Also use sequence numbers for comparison instead of JSON.stringify
-			// which is fragile due to key ordering and floating point differences.
-			if (afterWrite.length >= kept.length) {
-				// No data loss — either events were appended and kept, or nothing happened.
-				return {
-					originalSize,
-					compactedSize: fs.statSync(eventsPath).size,
-					eventsRemoved: originalCount - kept.length,
-					eventsKept: kept.length + Math.max(0, afterWrite.length - kept.length),
-				};
-			}
-			// afterWrite.length < kept.length — events were lost during compaction window.
-			// Find missing events and re-append them.
-			// FIX: Use sequence numbers for comparison instead of JSON.stringify.
-			const afterSeqs = new Set(afterWrite.map((e) => e.metadata?.seq).filter((s): s is number => s !== undefined));
-			const missingEvents = kept.filter((e) => e.metadata?.seq === undefined || !afterSeqs.has(e.metadata.seq));
-			let recoveredCount = 0;
-			let recoveryFailed = false;
-			if (missingEvents.length > 0) {
-				// BUGFIX (Round 12 C2): the previous loop called atomicWriteFile PER event,
-				// which REPLACES the entire file each iteration — destroying the
-				// compacted log and all previously-recovered events, leaving only the
-				// LAST missing event. FIX: accumulate all missing events into one
-				// string and append in a single write (appendFileSync appends without
-				// destroying existing content).
-				const recoveryLines = missingEvents.map((e) => JSON.stringify(e) + "\n").join("");
-				try {
-					fs.appendFileSync(eventsPath, recoveryLines);
-					recoveredCount = missingEvents.length;
-				} catch (err) {
-					recoveryFailed = true;
-					logInternalError("event-log-rotation.recovery", err, `eventsPath=${eventsPath} lostEvents=${missingEvents.length}`);
-				}
-			}
+/** Round 24 (BUG 1): the write+recover phase of compaction. Assumes the
+ * caller ALREADY holds the event-log lock (or accepts the unlocked race). */
+export function applyCompactionUnlocked(
+	eventsPath: string,
+	prepared: { lines: string; originalSize: number; originalCount: number; kept: TeamEvent[] },
+): CompactionResult | undefined {
+	const { lines, originalSize, originalCount, kept } = prepared;
+	try {
+		atomicWriteFile(eventsPath, lines);
+	} catch (err) {
+		// Concurrent write conflict — skip compaction this cycle
+		logInternalError("event-log-rotation.compact", err, `eventsPath=${eventsPath}`);
+		return undefined;
+	}
+	// C2: Re-read to recover any events appended during the compaction window.
+	// Events appended during the compaction window are preserved because they
+	// appear in afterWrite and the condition afterWrite.length >= kept.length is
+	// true, so they are included in the return stats without entering the
+	// recovery branch.
+	try {
+		const afterWrite = readEvents(eventsPath);
+		// FIX: Check if events were actually lost (afterWrite.length < kept.length)
+		// rather than using appendedDuringWindow >= 0 which is always true.
+		// Also use sequence numbers for comparison instead of JSON.stringify
+		// which is fragile due to key ordering and floating point differences.
+		if (afterWrite.length >= kept.length) {
 			return {
 				originalSize,
 				compactedSize: fs.statSync(eventsPath).size,
 				eventsRemoved: originalCount - kept.length,
-				eventsKept: kept.length + recoveredCount,
-				recoveryFailed,
-			};
-		} catch {
-			// Post-write verification failed — compaction likely succeeded.
-			const compactedSize = fs.statSync(eventsPath).size;
-			return {
-				originalSize,
-				compactedSize,
-				eventsRemoved: originalCount - kept.length,
-				eventsKept: kept.length,
+				eventsKept: kept.length + Math.max(0, afterWrite.length - kept.length),
 			};
 		}
-	});
+		// afterWrite.length < kept.length — events were lost during compaction window.
+		const afterSeqs = new Set(afterWrite.map((e) => e.metadata?.seq).filter((s): s is number => s !== undefined));
+		const missingEvents = kept.filter((e) => e.metadata?.seq === undefined || !afterSeqs.has(e.metadata.seq));
+		let recoveredCount = 0;
+		let recoveryFailed = false;
+		if (missingEvents.length > 0) {
+			const recoveryLines = missingEvents.map((e) => JSON.stringify(e) + "\n").join("");
+			try {
+				fs.appendFileSync(eventsPath, recoveryLines);
+				recoveredCount = missingEvents.length;
+			} catch (err) {
+				recoveryFailed = true;
+				logInternalError("event-log-rotation.recovery", err, `eventsPath=${eventsPath} lostEvents=${missingEvents.length}`);
+			}
+		}
+		return {
+			originalSize,
+			compactedSize: fs.statSync(eventsPath).size,
+			eventsRemoved: originalCount - kept.length,
+			eventsKept: kept.length + recoveredCount,
+			recoveryFailed,
+		};
+	} catch {
+		// Post-write verification failed — compaction likely succeeded.
+		return {
+			originalSize,
+			compactedSize: fs.statSync(eventsPath).size,
+			eventsRemoved: originalCount - kept.length,
+			eventsKept: kept.length,
+		};
+	}
 }
 
 /**
@@ -161,33 +174,41 @@ export function rotateEventLog(eventsPath: string): boolean {
 	// FIX: Wrap rotation in lock to prevent race conditions with concurrent readers.
 	// Order of operations: (1) create new empty file, (2) rename old file to archive.
 	// This ensures eventsPath always exists — a reader never sees a missing file.
-	return withEventLogLockSync(eventsPath, () => {
-		try {
-			const ts = new Date().toISOString().replace(/[:.]/g, "-");
-			let archivePath = `${eventsPath}.${ts}.archive.jsonl`;
-			// Round 12: avoid timestamp collisions when two rotations happen within
-			// the same millisecond (copyFileSync would silently overwrite the
-			// first archive). Append a counter until the path is free.
-			let collision = 1;
-			while (fs.existsSync(archivePath)) {
-				archivePath = `${eventsPath}.${ts}.${collision}.archive.jsonl`;
-				collision++;
-			}
-			// BUGFIX (Round 12 C1): the previous order (atomicWriteFile empty THEN
-			// rename) destroyed ALL events — atomicWriteFile replaces the file
-			// in place, so the rename then moved an EMPTY file to the archive.
-			// FIX: copy current content to the archive first (archive is populated,
-			// original still intact), then truncate the original to empty in place.
-			// copyFileSync + writeFileSync("") ensures eventsPath ALWAYS exists
-			// (no missing-file window for concurrent readers).
-			fs.copyFileSync(eventsPath, archivePath);
-			fs.writeFileSync(eventsPath, "", "utf-8");
-			return true;
-		} catch (error) {
-			logInternalError("event-log.rotate", error, `eventsPath=${eventsPath}`);
-			return false;
+	//
+	// NOTE (Round 24 BUG 1): callers ALREADY holding the lock must call
+	// rotateEventLogUnlocked directly — this locked variant is NOT re-entrant.
+	return withEventLogLockSync(eventsPath, () => rotateEventLogUnlocked(eventsPath));
+}
+
+/** Round 24 (BUG 1): the lock-free core of rotation. Assumes the caller
+ * already holds the event-log lock (or accepts the unlocked race). */
+export function rotateEventLogUnlocked(eventsPath: string): boolean {
+	if (!fs.existsSync(eventsPath)) return false;
+	try {
+		const ts = new Date().toISOString().replace(/[:.]/g, "-");
+		let archivePath = `${eventsPath}.${ts}.archive.jsonl`;
+		// Round 12: avoid timestamp collisions when two rotations happen within
+		// the same millisecond (copyFileSync would silently overwrite the
+		// first archive). Append a counter until the path is free.
+		let collision = 1;
+		while (fs.existsSync(archivePath)) {
+			archivePath = `${eventsPath}.${ts}.${collision}.archive.jsonl`;
+			collision++;
 		}
-	});
+		// BUGFIX (Round 12 C1): the previous order (atomicWriteFile empty THEN
+		// rename) destroyed ALL events — atomicWriteFile replaces the file
+		// in place, so the rename then moved an EMPTY file to the archive.
+		// FIX: copy current content to the archive first (archive is populated,
+		// original still intact), then truncate the original to empty in place.
+		// copyFileSync + writeFileSync("") ensures eventsPath ALWAYS exists
+		// (no missing-file window for concurrent readers).
+		fs.copyFileSync(eventsPath, archivePath);
+		fs.writeFileSync(eventsPath, "", "utf-8");
+		return true;
+	} catch (error) {
+		logInternalError("event-log.rotate", error, `eventsPath=${eventsPath}`);
+		return false;
+	}
 }
 
 export interface EventLogStats {

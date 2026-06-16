@@ -9,7 +9,7 @@ import { logInternalError } from "../utils/internal-error.ts";
 import { readJsonlSince, type IncrementalReadState } from "../utils/incremental-reader.ts";
 import { redactSecrets } from "../utils/redaction.ts";
 import { sleepSync } from "../utils/sleep.ts";
-import { needsRotation, compactEventLog, rotateEventLog } from "./event-log-rotation.ts";
+import { needsRotation, compactEventLog, rotateEventLog, applyCompactionUnlocked, prepareCompaction, rotateEventLogUnlocked } from "./event-log-rotation.ts";
 
 export type TeamEventProvenance = "live_worker" | "test" | "healthcheck" | "replay" | "api" | "background" | "team_runner";
 export type TeamWatcherAction = "act" | "observe" | "ignore";
@@ -520,9 +520,14 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 	if (!isTerminal && fs.existsSync(eventsPath)) {
 		const stat = fs.statSync(eventsPath);
 		if (stat.size > MAX_EVENTS_BYTES) {
-			// Try immediate compact (not waiting for counter % 100)
+			// Try immediate compact (not waiting for counter % 100).
+			// Round 24 (BUG 1): we are INSIDE withEventLogLockSync. Use the unlocked
+			// apply/rotate cores — the locked variants would deadlock (mkdir lock
+			// is not re-entrant → 5s timeout → compaction/rotation never ran →
+			// unbounded log growth → events silently dropped past 50MB).
 			try {
-				compactEventLog(eventsPath);
+				const prepared = prepareCompaction(eventsPath);
+				if (prepared) applyCompactionUnlocked(eventsPath, prepared);
 			} catch (error) {
 				logInternalError("event-log.immediate-compact", error, `eventsPath=${eventsPath}`);
 			}
@@ -530,7 +535,7 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 			if (fs.existsSync(eventsPath)) {
 				const afterCompact = fs.statSync(eventsPath);
 				if (afterCompact.size > MAX_EVENTS_BYTES) {
-					rotateEventLog(eventsPath);
+					rotateEventLogUnlocked(eventsPath);
 				}
 			}
 		}
@@ -578,7 +583,15 @@ function appendEventInsideLock(eventsPath: string, event: AppendTeamEvent): Team
 	}
 	appendCounter++;
 	if (appendCounter % 100 === 0 && needsRotation(eventsPath)) {
-		try { compactEventLog(eventsPath); } catch (error) { logInternalError("event-log.rotation", error, `eventsPath=${eventsPath}`); }
+		// Round 24 (BUG 1): we are INSIDE withEventLogLockSync here (called via
+		// appendEventInsideLock). The mkdir lock is NOT re-entrant, so calling the
+		// locked compactEventLog would deadlock → 5s timeout → compaction never
+		// ran → unbounded log growth → events silently dropped past 50MB. Use the
+		// unlocked apply path instead (lock already held).
+		try {
+			const prepared = prepareCompaction(eventsPath);
+			if (prepared) applyCompactionUnlocked(eventsPath, prepared);
+		} catch (error) { logInternalError("event-log.rotation", error, `eventsPath=${eventsPath}`); }
 	}
 	try { emitFromTeamEvent(fullEvent); } catch (error) { logInternalError("event-log.emit", error); }
 	return fullEvent;

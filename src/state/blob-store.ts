@@ -190,16 +190,18 @@ export function writeBlob(artifactsRoot: string, input: {
 			metadataWritten = true;
 		});
 	} catch (error) {
-		// Issue 4 fix: Clean up orphaned blob if metadata write fails.
-		// If metadata write fails (e.g., concurrent conflict), the blob content
-		// is orphaned since no metadata references it. Clean it up to reclaim space.
-		// Issue 8 fix: Do NOT delete blob content on metadata failure.
-		// If metadata write fails due to concurrent conflict (different values),
-		// the blob content is still valid. Another process has written metadata
-		// referencing this blob - deleting the blob would orphan their metadata.
-		// The caller can retry the metadata write if needed.
-		// However, if metadata was never written (metadataWritten === false),
-		// the blob is orphaned and should be cleaned up.
+		// Round 24 (BUG 4 note): the catch block previously checked
+		// `if (!blobContentWritten)` — the WRONG variable (the local comment said
+		// `metadataWritten === false`). For a CONTENT-ADDRESSED store the blob path
+		// is the content hash, so the blob may be referenced by another process's
+		// metadata even when OUR metadata write failed (e.g. a concurrent conflict
+		// where the peer already wrote metadata for the same hash). Deleting it
+		// would orphan their metadata. The safe behavior is therefore to NEVER
+		// delete on a metadata write failure and let the periodic
+		// cleanupOrphanedBlobs() reclaim genuinely-orphaned blobs. The guard below
+		// only removes a blob when its CONTENT was never written (a stray/partial
+		// file from a failed content write) — which is the only unambiguously-safe
+		// case to clean up here.
 		if (!blobContentWritten) {
 			try { fs.rmSync(blobPath, { force: true }); } catch { /* best-effort */ }
 		}
