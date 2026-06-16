@@ -57,7 +57,12 @@ export const CARGO_RUST_GATES: Array<{ name: string; command: string; critical: 
  * Execute a single command and capture output.
  */
 /** Characters/patterns that indicate dangerous shell metacharacters. */
-const DANGEROUS_SHELL_PATTERNS = /(?:;|&&|\|\||\$\(|`|\$\{|\b(eval|exec)\b|>>|<[^&])/;
+// Round 25 (VULN-3/VULN-4): also block raw newlines (sh -c treats \n as a
+// command separator -> injection) and bare $VARNAME references (can exfiltrate
+// secrets into captured gate output, e.g. `echo $ANTHROPIC_API_KEY`).
+// $+word-char is blocked; special vars like $?/$$/$! are left alone. Built-in
+// gates use only `2>&1` (no $VAR), so this does not break them.
+const DANGEROUS_SHELL_PATTERNS = /(?:;|&&|\|\||\$\(|`|\$\{|\$\w|\b(eval|exec)\b|>>|<[^^&]|[\r\n])/;
 // Note: single `>` is NOT blocked here because `2>&1` is a safe redirect used by built-in gates.
 // `>>` (append) is still blocked. `<` without `&` (input redirect) is still blocked.
 
@@ -66,7 +71,22 @@ const DANGEROUS_SHELL_PATTERNS = /(?:;|&&|\|\||\$\(|`|\$\{|\b(eval|exec)\b|>>|<[
  * Rejects commands with shell metacharacters that could enable injection.
  * Allows: pipes (|), redirection of stderr (2>&1), and basic npm/cargo/npx commands.
  */
+/** @internal — exported for injection-guard unit testing (Round 25). */
+export function __test__validateGateCommand(command: string): void {
+	validateGateCommand(command);
+}
+
 function validateGateCommand(command: string): void {
+	// Round 25 (VULN-3): check the ORIGINAL command for raw newlines BEFORE
+	// normalization. The regex below runs on the NORMALIZED command (which
+	// collapses \s+ incl. newlines to a single space), so a newline would be
+	// hidden from it - but `sh -c` treats a raw newline as a command
+	// separator, enabling injection (e.g. `npm test\nrm -rf x`).
+	if (/[\r\n]/.test(command)) {
+		throw new Error(
+			`Security: verification gate command rejected (raw newline - potential command injection): ${JSON.stringify(command)}`,
+		);
+	}
 	const normalized = command
 		.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')  // ANSI escape sequences
 		.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')  // control chars

@@ -29,8 +29,8 @@
  * signal, NOT a security boundary:
  *   - It only causes the (already-compromised) child to exit earlier.
  *   - A truly malicious child can simply not call `startParentGuard()`.
- *   - Real protection against hostile children comes from the sandbox,
- *     env-filter allowlist, and redaction — all enforced before spawn.
+ *   - Real protection against hostile children comes from the env-filter
+ *     allowlist and redaction — all enforced before spawn.
  *
  * The guard exists for the benign case: a parent dies (user closes the
  * terminal, pi crashes, machine loses power) and we want all detached
