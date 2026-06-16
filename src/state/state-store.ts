@@ -227,6 +227,8 @@ export function createRunManifest(params: {
 	goal: string;
 	workspaceMode?: "single" | "worktree";
 	ownerSessionId?: string;
+	/** Task ID for agent naming (e.g., task-001) */
+	taskId?: string;
 }): { manifest: TeamRunManifest; tasks: TeamTaskState[]; paths: RunPaths } {
 	const paths = createRunPaths(params.cwd);
 	const now = new Date().toISOString();
@@ -249,6 +251,7 @@ export function createRunManifest(params: {
 		eventsPath: paths.eventsPath,
 		artifacts: [],
 		...(params.ownerSessionId ? { ownerSessionId: params.ownerSessionId } : {}),
+		...(params.taskId ? { taskId: params.taskId } : {}),
 	};
 	fs.mkdirSync(paths.stateRoot, { recursive: true });
 	fs.mkdirSync(paths.artifactsRoot, { recursive: true });

@@ -37,6 +37,8 @@ export interface BuildPiWorkerArgsInput {
 	env?: NodeJS.ProcessEnv;
 	/** Role for tool restrictions (uses role-tools.ts config) */
 	role?: string;
+	/** Task ID for agent naming (e.g., task-001_analyst) */
+	taskId?: string;
 }
 
 export interface BuildPiWorkerArgsResult {
@@ -246,6 +248,11 @@ export function buildPiWorkerArgs(input: BuildPiWorkerArgsInput): BuildPiWorkerA
 	const args = ["--mode", "json", "-p"];
 	if (input.sessionEnabled === false) args.push("--no-session");
 
+	// If taskId provided, prefix agent name with it: "analyst" -> "task-001_analyst"
+	const effectiveAgentName = input.taskId
+		? `${input.taskId}_${input.agent.name}`
+		: input.agent.name;
+
 	const resolvedModel = input.model ?? input.agent.model;
 	if (resolvedModel) {
 		const modelWithThinking = applyThinkingSuffix(resolvedModel, input.agent.thinking);
@@ -289,7 +296,7 @@ export function buildPiWorkerArgs(input: BuildPiWorkerArgsInput): BuildPiWorkerA
 		// other pi state and don't pollute the shared system temp dir.
 		const tmpBase = getPiTempBase();
 		tempDir = createSafeTempDir(tmpBase, `pi-crew-${process.pid}-`);
-		const promptPath = path.join(tempDir, `${input.agent.name.replace(/[^\w.-]/g, "_")}.md`);
+		const promptPath = path.join(tempDir, `${effectiveAgentName.replace(/[^\w.-]/g, "_")}.md`);
 		fs.writeFileSync(promptPath, input.agent.systemPrompt, { mode: 0o600 });
 		args.push(input.agent.systemPromptMode === "append" ? "--append-system-prompt" : "--system-prompt", promptPath);
 	}
@@ -316,12 +323,12 @@ export function buildPiWorkerArgs(input: BuildPiWorkerArgsInput): BuildPiWorkerA
 			PI_CREW_INHERIT_SKILLS: input.agent.inheritSkills ? "1" : "0",
 			PI_CREW_DEPTH: String(parentDepth + 1),
 			PI_CREW_MAX_DEPTH: String(maxDepth),
-			PI_CREW_ROLE: input.agent.name,
+			PI_CREW_ROLE: effectiveAgentName,
 			PI_TEAMS_INHERIT_PROJECT_CONTEXT: input.agent.inheritProjectContext ? "1" : "0",
 			PI_TEAMS_INHERIT_SKILLS: input.agent.inheritSkills ? "1" : "0",
 			PI_TEAMS_DEPTH: String(parentDepth + 1),
 			PI_TEAMS_MAX_DEPTH: String(maxDepth),
-			PI_TEAMS_ROLE: input.agent.name,
+			PI_TEAMS_ROLE: effectiveAgentName,
 		},
 		tempDir,
 	};

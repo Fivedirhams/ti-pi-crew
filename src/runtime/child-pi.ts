@@ -160,6 +160,8 @@ export interface ChildPiRunInput {
 	agentId?: string;
 	/** Role for tool restrictions (from role-tools.ts) */
 	role?: string;
+	/** Task ID for agent naming (e.g., task-001_analyst) */
+	taskId?: string;
 	/** Root directory for artifacts (used to validate transcriptPath). */
 	artifactsRoot?: string;
 }
@@ -534,7 +536,7 @@ export async function runChildPi(input: ChildPiRunInput): Promise<ChildPiRunResu
 		if (mock === "retryable-failure") return { exitCode: 1, stdout: "", stderr: "[MOCK] rate limit: mock failure" };
 		return { exitCode: 1, stdout: "", stderr: `[MOCK] failure: ${mock}` };
 	}
-	const built = buildPiWorkerArgs({ task: effectiveTask, agent: input.agent, model: input.model, sessionEnabled: true, maxDepth: input.maxDepth, skillPaths: input.skillPaths, role: input.role });
+	const built = buildPiWorkerArgs({ task: effectiveTask, agent: input.agent, model: input.model, sessionEnabled: true, maxDepth: input.maxDepth, skillPaths: input.skillPaths, role: input.role, taskId: input.taskId });
 	const spawnSpec = getPiSpawnCommand(built.args);
 	try {
 		return await new Promise<ChildPiRunResult>((resolve) => {

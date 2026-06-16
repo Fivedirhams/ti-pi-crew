@@ -1,4 +1,6 @@
 import { allAgents, discoverAgents } from "../../agents/discover-agents.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { allTeams, discoverTeams } from "../../teams/discover-teams.ts";
 import { allWorkflows, discoverWorkflows } from "../../workflows/discover-workflows.ts";
 import { loadConfig } from "../../config/config.ts";
@@ -85,6 +87,25 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	const workingDir = ctx.cwd ?? process.cwd();
 	const { ensureCrewDirectory } = await import("../../state/crew-init.ts");
 	await ensureCrewDirectory(workingDir);
+
+	// CONTEXT COMPACTION RECOVERY: Check if there's an active run in runs.json
+	// that we can resume after context compaction
+	try {
+		const piOpsDir = path.join(workingDir, 'piOps');
+		const runsPath = path.join(piOpsDir, 'runs.json');
+		if (fs.existsSync(runsPath)) {
+			const runsData = fs.readFileSync(runsPath, 'utf-8');
+			const runs: Array<{id: string; task_id: string; status: string}> = JSON.parse(runsData);
+			const activeRun = runs.find(r => r.status === 'started');
+			if (activeRun) {
+				console.log(`[Recovery] Found active run: ${activeRun.id} for task: ${activeRun.task_id}`);
+				// Could set ctx.taskId = activeRun.task_id here if needed
+			}
+		}
+	} catch (e) {
+		// Ignore errors - recovery is best-effort
+		console.log('[Recovery] Could not check for active runs:', e);
+	}
 
 	// WORKTREE FIX: If worktree mode is needed but cwd is not a git repo,
 	// auto-correct to the nearest git repo root. This prevents "not a git repository"

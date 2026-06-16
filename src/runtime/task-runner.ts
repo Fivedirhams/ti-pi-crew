@@ -255,6 +255,31 @@ export async function runTeamTask(
 			timestamp: Date.now(),
 		});
 		const permissionMode = permissionForRole(task.role);
+
+		// PI-OPS LOGGING: Write to runs.json for task/run tracking
+		try {
+			const piOpsDir = path.join(task.cwd, 'piOps');
+			if (!fs.existsSync(piOpsDir)) {
+				fs.mkdirSync(piOpsDir, { recursive: true });
+			}
+			const runsPath = path.join(piOpsDir, 'runs.json');
+			let runs: any[] = [];
+			if (fs.existsSync(runsPath)) {
+				runs = JSON.parse(fs.readFileSync(runsPath, 'utf-8'));
+			}
+			runs.push({
+				id: manifest.runId,
+				task_id: manifest.taskId || task.id,
+				agent_name: `${manifest.taskId || ''}_${task.role}`.replace(/^_/, ''),
+				stage: task.role,
+				status: 'started',
+				started_at: new Date().toISOString()
+			});
+			fs.writeFileSync(runsPath, JSON.stringify(runs, null, 2));
+		} catch (e) {
+			// Log error but don't fail the task
+			console.log('[piOps] Could not write runs.json:', e);
+		}
 		const renderedSkills =
 			input.skillBlock === undefined
 				? renderSkillInstructions({
@@ -507,6 +532,7 @@ export async function runTeamTask(
 					role: task.role,
 					runId: manifest.runId,
 					agentId: task.id,
+					taskId: manifest.taskId,
 					artifactsRoot: manifest.artifactsRoot,
 					onSpawn: (pid) => {
 						try {
