@@ -931,8 +931,16 @@ tasks = mergeResult.resultTasks;
 		await saveRunTasksAsync(finalManifest, tasks);
 	});
 	manifest = finalManifest;
-	// Save health snapshot on run completion
-	const crewRoot = path.dirname(path.dirname(finalManifest.stateRoot));
+	// Save health snapshot on run completion.
+	// BUG A (pts/2 hang investigation 2026-06-16): stateRoot = `<crewRoot>/state/runs/<runId>`,
+	// so the crew root is THREE dirnames up, not two. Two dirnames gave `<crewRoot>/state`
+	// (the state dir), and HealthStore then joined HEALTH_DIR (`.crew/state/health`)
+	// onto it → `<crewRoot>/state/.crew/state/health` — a double-joined BOGUS path.
+	// That wrote health snapshots to a nonexistent subtree (silently breaking the
+	// health feature) AND created junk dirs that the recursive state watcher then
+	// attached extra inotify watches to. Fix: compute the real crew root (3 up)
+	// and make HEALTH_DIR relative to it.
+	const crewRoot = path.dirname(path.dirname(path.dirname(finalManifest.stateRoot)));
 	const healthStore = new HealthStore(crewRoot);
 	healthStore.saveSnapshot({
 		runId: finalManifest.runId,

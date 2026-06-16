@@ -494,8 +494,14 @@ function mergeConfig(
 			delete merged.otlp.headers;
 		// Validate OTLP headers for injection attacks:
 		// - Check top-level keys for dangerous prototype pollution patterns
-		// - Block all control characters (except tab=0x09, newline=0x0A) to prevent
-		//   header injection via CR/LF/zero-byte/etc.
+		// - Block ALL control characters except tab (0x09) to prevent header
+		//   injection via CR/LF/zero-byte/etc.
+		// BUG (Round 28, CRLF injection): the previous range
+		//   /[\x00-\x08\x0b\x0c\x0e-\x1f]/ left THREE chars unblocked: tab (0x09,
+		//   intentionally allowed), LF (0x0A) AND CR (0x0D). The comment claimed to
+		//   "prevent header injection via CR/LF" but CR was never matched, and LF
+		//   was explicitly allowed — both are CRLF injection vectors that can split
+		//   HTTP headers. Fix: block 0x00-0x08 and 0x0A-0x1F, allowing only tab.
 		const invalidHeaders: string[] = [];
 		for (const [k, v] of Object.entries(merged.otlp.headers ?? {})) {
 			// Check top-level key for dangerous names (only top-level keys are checked)
@@ -505,9 +511,10 @@ function mergeConfig(
 				return false;
 			};
 			if (checkKey(k)) { invalidHeaders.push(k); continue; }
-			// Block any control characters except tab (0x09) in values
+			// Block any control characters except tab (0x09) in values.
+			// Round 28 fix: /[\x00-\x08\x0a-\x1f]/ blocks LF (0x0A) and CR (0x0D) too.
 			const valStr = String(v);
-			if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(valStr)) { invalidHeaders.push(k); }
+			if (/[\x00-\x08\x0a-\x1f]/.test(valStr)) { invalidHeaders.push(k); }
 		}
 		if (invalidHeaders.length > 0) {
 			delete merged.otlp.headers;

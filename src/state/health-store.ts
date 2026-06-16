@@ -4,7 +4,12 @@ import type { RunHealth } from "../runtime/task-health.ts";
 import { computeRunHealth } from "../runtime/task-health.ts";
 import type { ManifestSummary } from "../runtime/task-health.ts";
 
-const HEALTH_DIR = ".crew/state/health";
+// Relative to the crew root (`<cwd>/.crew`). BUG A fix (pts/2 hang
+// investigation 2026-06-16): this was `.crew/state/health`, which double-joined
+// to `<crewRoot>/state/.crew/state/health` because the caller passed the state
+// dir (not the crew root). Now the caller passes the real crew root, so this is
+// a plain `state/health` suffix.
+const HEALTH_DIR = "state/health";
 
 export interface HealthSnapshot {
   runId: string;
