@@ -32,6 +32,8 @@ import {
 	isRetryableModelFailure,
 	type ModelAttemptSummary,
 } from "./model-fallback.ts";
+import { readEnabledModelsPatterns } from "./model-scope.ts";
+import { loadConfig } from "../config/config.ts";
 import { tailReadWithLineSnap } from "./task-runner/tail-read.ts";
 import {
 	parsePiJsonOutput,
@@ -385,6 +387,7 @@ export async function runTeamTask(
 				parentModel: input.parentModel,
 				modelRegistry: input.modelRegistry,
 				cwd: task.cwd,
+				scopeModelsPatterns: await resolveTaskScopeModelsPatterns(task.cwd),
 			});
 			const candidates = modelRoutingPlan.candidates;
 			const attemptModels =
@@ -1305,4 +1308,22 @@ export async function runTeamTask(
 	} finally {
 		streamBridge?.dispose();
 	}
+}
+
+/**
+ * F7: resolve the enabledModels allowlist for the child-process spawn path,
+ * but only if `runtime.reliability.scopeModels` is ON. Returns [] (no-op)
+ * when the toggle is off or the allowlist is empty. Best-effort: any failure
+ * to read config or the allowlist silently disables the gate so spawn is
+ * never blocked by a misconfiguration.
+ */
+async function resolveTaskScopeModelsPatterns(cwd: string): Promise<string[]> {
+	let scopeModels = false;
+	try {
+		scopeModels = loadConfig(cwd).config.reliability?.scopeModels === true;
+	} catch {
+		return [];
+	}
+	if (!scopeModels) return [];
+	return readEnabledModelsPatterns(cwd);
 }

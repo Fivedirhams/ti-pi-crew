@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.7.8] — F7 model-scope enforcement + cross-session leak fix (2026-06-16)
+
+Two features/fixes from the same session: one new opt-in capability, one
+correctness fix for a bug surfaced by the user while iterating on the new
+feature (firing live in the session — a different Pi session's in-flight
+run kept getting injected into the current session's context via the
+ambient-status handler).
+
+### Features
+
+- **F7 model-scope enforcement** — opt-in gate that validates subagent model
+  choices against the user's pi `enabledModels` allowlist. Trust distinction
+  matches the pi-subagents reference semantics:
+  - Caller-supplied (per-spawn `modelOverride` / `step.model` /
+    `teamRoleModel`) out-of-scope → **hard error** (`CrewError E013
+    ModelOutOfScope`) before spawn, fail-fast with actionable help hint.
+  - Frontmatter-pinned (`AgentConfig.model`) out-of-scope → **warning +
+    runs anyway** (frontmatter is authoritative; the agent author made a
+    deliberate choice).
+  Pattern semantics match pi's `--models` allowlist: exact
+  (case-insensitive), glob with `*` (unanchored, so `"claude-*"` matches
+  `anthropic/claude-opus-4-5`), and case-insensitive substring fallback.
+  Toggle: `runtime.reliability.scopeModels: true` (default `false` = no
+  enforcement, fully back-compat). The allowlist itself is read from
+  pi's `SettingsManager.getEnabledModels()` per spawn (no caching, so
+  changes take effect immediately). 20 new unit tests covering pattern
+  matching, scope verdicts, and the routing gate (caller/frontmatter
+  trust distinction + `isFrontmatterOverride` downgrade).
+
+### Bug Fixes
+
+- **Cross-session run-context leak** (commit `4bd6f5b`) — `collectInFlightRuns(cwd)`
+  in `compaction-guard.ts` scanned the SHARED per-project `.crew/state/runs/`
+  dir and filtered by STATUS only, ignoring `ownerSessionId`. Multiple Pi
+  sessions in the same project share that directory, so Session B's
+  compaction picked up Session A's in-flight runs and injected them into B's
+  continuation prompt, making B wrongly try to resume A's run. The same
+  leak affected ambient-status injection (`context-status-injection.ts`),
+  showing A's runs in B's context stream. Fix: `collectInFlightRuns`
+  gains optional `currentSessionId?` → strict filter
+  `run.ownerSessionId === currentSessionId` (legacy ownerless runs
+  excluded; true orphans are crash-recovery's job). New canonical
+  `extractSessionId(ctx)` helper in `utils/session-utils.ts` (defensive
+  against Proxy/exotic objects, replaces inline
+  getOwnPropertyDescriptor in `register.ts`). Artifact index stays
+  UNFILTERED (durable cross-session memory, not a resume directive).
+  `triggerContinuation`'s `sendUserMessage` race ("Agent is already
+  processing a prompt...") is detected and downgraded to silent — it is
+  benign (the worker continues independently). 11 new regression tests
+  (compaction-cross-session-leak.test.ts). CI green on all 3 platforms
+  (run `27608398599`).
+
+### Files
+
+- NEW `src/runtime/model-scope.ts` — pattern matcher + verdict + SettingsManager
+  reader.
+- `src/runtime/model-fallback.ts` — `buildConfiguredModelRouting` gains
+  `scopeModelsPatterns?` + `isFrontmatterOverride?` inputs; new
+  `CrewError E013 ModelOutOfScope` factory in `src/errors.ts`.
+- `src/config/types.ts` — new `reliability.scopeModels?: boolean` toggle
+  (default `false`).
+- `src/extension/team-tool/handle-settings.ts` — adds
+  `reliability.scopeModels` to the visible-keys list so it surfaces in
+  the settings overlay.
+- `src/extension/registration/compaction-guard.ts`,
+  `src/extension/context-status-injection.ts`,
+  `src/extension/register.ts`, `src/utils/session-utils.ts` — leak fix.
+- NEW `test/unit/model-scope.test.ts` (20 tests),
+  `test/unit/compaction-cross-session-leak.test.ts` (11 tests).
+
+typecheck clean; 4968+ tests pass / 0 fail.
+
 ## [0.7.7] — Windows spawn fix + plan-approval crash-recovery fix + CI flake fixes (2026-06-16)
 
 A focused patch release driven by two community reports (Issue #33 and PR #32) plus the CI flake surfaced while validating them. CI green on Windows / Ubuntu / macOS (run 27599121797). 4965 tests pass / 0 fail.

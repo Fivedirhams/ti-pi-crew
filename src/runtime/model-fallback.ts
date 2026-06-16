@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { errors } from "../errors.ts";
+import { checkModelScope } from "./model-scope.ts";
 import { fuzzyResolveModelId } from "./model-resolver.ts";
 
 export interface AvailableModelInfo {
@@ -241,6 +243,15 @@ export interface ConfiguredModelRouting {
 	requested?: string;
 	candidates: string[];
 	reason?: string;
+	/**
+	 * F7 scope gate verdict. Populated when the caller passed `scopeModelsPatterns`.
+	 * - `inScope: true` → the resolved model is inside the allowlist (or no allowlist).
+	 * - `inScope: false, source: "caller"` → caller override is out-of-scope; the
+	 *   function throws `errors.modelOutOfScope` (hard error before spawn) UNLESS
+	 *   the caller marked it as a frontmatter override (`isFrontmatterOverride: true`),
+	 *   in which case the verdict is returned for the caller to log as a warning.
+	 */
+	scopeVerdict?: import("./model-scope.ts").ModelScopeCheck;
 }
 
 export function buildConfiguredModelRouting(input: {
@@ -252,6 +263,19 @@ export function buildConfiguredModelRouting(input: {
 	parentModel?: unknown;
 	modelRegistry?: unknown;
 	cwd?: string;
+	/**
+	 * F7: when set, enforce the enabledModels allowlist. Caller-supplied out-of-
+	 * scope models throw `errors.modelOutOfScope`; frontmatter-pinned out-of-scope
+	 * models are returned as a `scopeVerdict` for the caller to log.
+	 */
+	scopeModelsPatterns?: string[];
+	/**
+	 * F7: when true, the `overrideModel` (if any) is treated as a frontmatter
+	 * (agent) override rather than a per-spawn caller override — out-of-scope
+	 * is a warning, not a hard error. Used when the agent config is the
+	 * authoritative source.
+	 */
+	isFrontmatterOverride?: boolean;
 }): ConfiguredModelRouting {
 	const registryModels = availableModelInfosFromRegistry(input.modelRegistry);
 	const configModels = configuredModelInfosFromPiConfig(input.cwd);
@@ -275,7 +299,21 @@ export function buildConfiguredModelRouting(input: {
 		: candidates.length > 1
 			? "configured Pi fallback chain"
 			: undefined;
-	return { requested, candidates, reason };
+	// F7 scope gate: when `scopeModelsPatterns` is configured, check the
+	// resolved model. Caller-supplied (override/step/team role) out-of-scope
+	// is a HARD ERROR (we surface it via the verdict AND throw, so spawn aborts
+	// before any cost is incurred). Frontmatter-pinned out-of-scope is a
+	// WARNING returned on the verdict for the caller to log.
+	let scopeVerdict: ConfiguredModelRouting["scopeVerdict"];
+	if (input.scopeModelsPatterns && input.scopeModelsPatterns.length > 0) {
+		const resolved = candidates[0] ?? requested;
+		const source = input.overrideModel ? "caller" : input.agentModel ? "frontmatter" : "resolved";
+		scopeVerdict = checkModelScope(resolved, input.scopeModelsPatterns, source);
+		if (!scopeVerdict.inScope && source === "caller" && !input.isFrontmatterOverride) {
+			throw errors.modelOutOfScope(resolved ?? "", input.scopeModelsPatterns);
+		}
+	}
+	return { requested, candidates, reason, scopeVerdict };
 }
 
 export function buildConfiguredModelCandidates(input: Parameters<typeof buildConfiguredModelRouting>[0]): string[] {

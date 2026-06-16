@@ -38,6 +38,7 @@ export const ErrorCode = {
   EventLogLockTimeout: "E010",      // Could not acquire the event-log file lock
   DepthLimitExceeded: "E011",       // Pipeline/chain recursion depth limit hit (circular dep)
   RunStale: "E012",                 // Run reconciled as stale/zombie (heartbeat expired)
+  ModelOutOfScope: "E013",          // Caller-supplied model is not in pi's enabledModels allowlist (F7 scope gate)
 } as const;
 
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
@@ -56,6 +57,7 @@ const DEFAULT_HELP: Record<ErrorCode, string | undefined> = {
   [ErrorCode.EventLogLockTimeout]: "Another process holds the event-log lock. Check for orphaned `.lock` files or stale pi-crew processes, then retry.",
   [ErrorCode.DepthLimitExceeded]: "A pipeline/chain exceeded the recursion depth limit, which usually indicates a circular stage dependency. Review step `dependsOn` chains.",
   [ErrorCode.RunStale]: "The worker stopped heartbeating and was treated as a zombie. Re-run the team (resume or fresh); if it recurs, check `runtime.executeWorkers` / system load.",
+  [ErrorCode.ModelOutOfScope]: "The requested model is not in your pi `enabledModels` allowlist. Either pick a model listed in `enabledModels` (settings.json) or extend the allowlist. The scope gate is opt-in — disable `runtime.reliability.scopeModels` to allow any model.",
 };
 
 /**
@@ -187,5 +189,12 @@ export const errors = {
       ErrorCode.RunStale,
       `Stale run reconciled (reason=${reason}).${age} The worker stopped heartbeating and was treated as dead/zombie.`,
     ).withContext("stale-run reconciliation");
+  },
+
+  modelOutOfScope(model: string, patterns: string[]): CrewError {
+    return new CrewError(
+      ErrorCode.ModelOutOfScope,
+      `Requested model "${model}" is not in enabledModels scope (allowlist: [${patterns.join(", ")}])`,
+    ).withContext("F7 model scope gate — caller override rejected");
   },
 } as const;

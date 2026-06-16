@@ -15,6 +15,8 @@ import type { WorkflowStep } from "../workflows/workflow-config.ts";
 import { isLiveSessionRuntimeAvailable } from "./runtime-resolver.ts";
 import { redactSecrets } from "../utils/redaction.ts";
 import { buildConfiguredModelRouting } from "./model-fallback.ts";
+import { readEnabledModelsPatterns } from "./model-scope.ts";
+import { loadConfig } from "../config/config.ts";
 import { DEFAULT_LIVE_SESSION } from "../config/defaults.ts";
 import { buildYieldReminder, hasYieldInOutput, isYieldEvent, extractYieldResult, validateYieldData, DEFAULT_YIELD_CONFIG, type YieldResult } from "./yield-handler.ts";
 import { buildMcpProxyFromSession } from "./mcp-proxy.ts";
@@ -177,6 +179,25 @@ function numberField(obj: Record<string, unknown> | undefined, keys: string[]): 
 		if (typeof value === "number" && Number.isFinite(value)) return value;
 	}
 	return undefined;
+}
+
+/**
+ * F7: resolve the enabledModels allowlist for the current project, but only
+ * if the `runtime.reliability.scopeModels` toggle is ON. Returns an empty
+ * array when the toggle is off or no allowlist is configured — the routing
+ * gate treats empty patterns as "no enforcement" (no-op). Best-effort:
+ * any failure to read the toggle or the allowlist silently disables the gate
+ * rather than blocking spawn.
+ */
+async function resolveScopeModelsPatterns(cwd: string, agentDir?: string): Promise<string[]> {
+	let scopeModels = false;
+	try {
+		scopeModels = loadConfig(cwd).config.reliability?.scopeModels === true;
+	} catch {
+		return [];
+	}
+	if (!scopeModels) return [];
+	return readEnabledModelsPatterns(cwd, agentDir);
 }
 
 function modelFromRegistry(modelRegistry: unknown, modelId: string | undefined): unknown {
@@ -405,7 +426,7 @@ export async function runLiveSessionTask(input: LiveSessionSpawnInput): Promise<
 			});
 			await (resourceLoader as { reload?: () => Promise<void> }).reload?.();
 		}
-		const modelRouting = buildConfiguredModelRouting({ overrideModel: input.modelOverride, stepModel: input.step.model, teamRoleModel: input.teamRoleModel, agentModel: input.agent.model, fallbackModels: input.agent.fallbackModels, parentModel: input.parentModel, modelRegistry: input.modelRegistry, cwd: input.manifest.cwd });
+		const modelRouting = buildConfiguredModelRouting({ overrideModel: input.modelOverride, stepModel: input.step.model, teamRoleModel: input.teamRoleModel, agentModel: input.agent.model, fallbackModels: input.agent.fallbackModels, parentModel: input.parentModel, modelRegistry: input.modelRegistry, cwd: input.manifest.cwd, scopeModelsPatterns: await resolveScopeModelsPatterns(input.manifest.cwd) });
 		const resolvedModel = modelFromRegistry(input.modelRegistry, modelRouting.candidates[0] ?? modelRouting.requested) ?? input.parentModel;
 		// Phase 4: MCP proxy — will be determined after session creation
 		// (we check parent's MCP tools and share connections when available)

@@ -205,6 +205,8 @@ const KNOWN_KEYS = new Set([
 	"reliability.retryPolicy.jitterRatio",
 	"reliability.retryPolicy.exponentialFactor",
 	"reliability.retryPolicy.retryableErrors",
+	// F7: opt-in model scope enforcement (hard-error caller out-of-scope, warn frontmatter).
+	"reliability.scopeModels",
 	// otlp
 	"otlp.enabled",
 	"otlp.endpoint",

@@ -180,6 +180,14 @@ export interface CrewReliabilityConfig {
 	cleanupOrphanedTempDirs?: boolean;
 	/** Inject a compact ambient crew-status note into the agent's context on every LLM call while crew runs are in-flight, so the agent stays continuously aware of active runs without calling the `team` tool. No-op when no runs are active. Default: true. */
 	ambientStatusInjection?: boolean;
+	/**
+	 * Opt-in model scope enforcement (F7). When true, subagent model choices
+	 * that fall outside the user's pi `enabledModels` allowlist are flagged:
+	 * caller-supplied out-of-scope → hard error before spawn; frontmatter-
+	 * pinned out-of-scope → warning + runs anyway. Default: false (no
+	 * enforcement, fully back-compat).
+	 */
+	scopeModels?: boolean;
 }
 
 export interface CrewOtlpConfig {
