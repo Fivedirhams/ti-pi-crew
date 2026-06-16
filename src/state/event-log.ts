@@ -110,24 +110,35 @@ export function withEventLogLockSync<T>(eventsPath: string, fn: () => T, options
 				// to check for orphaned .lock dirs / stale processes.
 				throw errors.eventLogLockTimeout(eventsPath, timeout);
 			}
-			// Stale detection: if the owning process is dead, remove the stale lock.
+			// Round 26 (BUG 3): mtime-based stale check INDEPENDENT of pidFile.
+			// If the holder crashed between mkdir and writing pidFile, there is no
+			// pidFile to read — the old code just slept until the 5s timeout, then
+			// threw, leaving the dir orphaned FOREVER (every retry repeats the
+			// timeout). Now: if the lock dir's mtime exceeds staleMs, reclaim it.
+			try {
+				const dirStat = fs.statSync(lockDir);
+				if (Date.now() - dirStat.mtimeMs > staleMs) {
+					fs.rmSync(lockDir, { recursive: true, force: true });
+					continue;
+				}
+			} catch { /* dir vanished — let loop retry */ }
+			// Round 26 (BUG 4): the mtime check was previously NESTED inside
+			// `if (!alive)`, so a recycled PID (crashed holder's PID reused by an
+			// unrelated live process) kept `alive=true` and the mtime check NEVER
+			// fired → permanent wedge. mtime is now checked FIRST (above) for ALL
+			// holders. The PID check below is a secondary fast-path: if the holder
+			// PID is provably dead AND the lock isn't stale yet, we still wait
+			// (don't steal a fresh lock just because the pid lookup raced).
 			try {
 				const raw = fs.readFileSync(pidFile, "utf-8").trim();
 				const ownerPid = Number.parseInt(raw, 10);
 				if (!Number.isNaN(ownerPid) && ownerPid !== process.pid) {
 					let alive = false;
 					try { process.kill(ownerPid, 0); alive = true; } catch { /* dead */ }
-					if (!alive) {
-						try {
-							const stat = fs.statSync(lockDir);
-							if (Date.now() - stat.mtimeMs > staleMs) {
-								fs.rmSync(lockDir, { recursive: true, force: true });
-								continue;
-							}
-						} catch { /* race — let loop sleep */ }
-					}
+					// (mtime already handled above; nothing to do here for dead-but-fresh.)
+					void alive;
 				}
-			} catch { /* no pid file — fall through to sleep */ }
+			} catch { /* no pid file — mtime check above already handles it */ }
 			sleepSync(10);
 		}
 	}
@@ -135,7 +146,19 @@ export function withEventLogLockSync<T>(eventsPath: string, fn: () => T, options
 		return fn();
 	} finally {
 		if (acquired) {
-			try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+			// Round 26 (BUG 5): token/PID-guarded release. Previously the release
+			// was an UNCONDITIONAL rmSync. If our fn exceeded staleMs, another
+			// process could steal our lock (rm our dir, make its own); when our fn
+			// finished our finally block would then DELETE THE STEALER's dir → both
+			// in the critical section + lost lock. Verify the pidFile still records
+			// OUR pid before removing; if it doesn't, the lock was stolen and the
+			// current holder owns the dir.
+			try {
+				const currentPid = fs.readFileSync(pidFile, "utf-8").trim();
+				if (currentPid === String(process.pid)) {
+					fs.rmSync(lockDir, { recursive: true, force: true });
+				}
+			} catch { /* lock stolen or already gone — do not touch */ }
 		}
 	}
 }

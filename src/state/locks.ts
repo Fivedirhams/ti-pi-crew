@@ -67,6 +67,57 @@ function isLockHolderAlive(filePath: string): boolean {
 }
 
 /**
+ * Round 26 (BUG 1): read the lock file ONCE and evaluate staleness + holder
+ * liveness from that single snapshot.
+ *
+ * Previously `acquireLockWithRetry` called `isLockStale()` and
+ * `isLockHolderAlive()` separately, each performing its own `readFileSync`.
+ * Between those two reads the lock could transition stale→fresh (old holder
+ * released, new holder acquired): isLockStale saw the OLD createdAt → stale,
+ * isLockHolderAlive saw the NEW pid → alive, yielding `!stale && alive` =
+ * false → we forcibly rm the NEW holder's freshly-acquired lock and take it
+ * ourselves → BOTH in the critical section. Reading once closes the window.
+ *
+ * Returns `{ canSteal: true }` if the lock is stale OR the holder is dead
+ * (safe to forcibly remove); `{ canSteal: false }` if it is fresh AND held by
+ * a live process (must keep waiting).
+ */
+function readLockSnapshot(filePath: string, staleMs: number): { canSteal: boolean } {
+	let stat: fs.Stats | undefined;
+	let raw: string | undefined;
+	try {
+		stat = fs.statSync(filePath);
+		raw = fs.readFileSync(filePath, "utf-8");
+	} catch {
+		// File vanished between writeLockFile's EEXIST and now (holder released).
+		// Loop will retry the create; safe to signal "nothing to steal".
+		return { canSteal: false };
+	}
+	// Staleness from a single snapshot.
+	let createdAt = parseCreatedAtFromLock(raw);
+	if (createdAt === undefined) createdAt = stat.mtimeMs;
+	const isStale = Date.now() - createdAt > staleMs;
+	// Holder liveness from the SAME snapshot.
+	let isAlive = true; // Unknown holder — assume alive to be safe (matches isLockHolderAlive).
+	try {
+		const parsed = JSON.parse(raw) as { pid?: unknown };
+		const pid = typeof parsed.pid === "number" ? parsed.pid : undefined;
+		if (pid !== undefined) {
+			try {
+				process.kill(pid, 0);
+				isAlive = true;
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				// EPERM/ESRCH → treat as not-alive (stealable), see isLockHolderAlive.
+				isAlive = false;
+			}
+		}
+	} catch { /* malformed payload — keep isAlive=true */ }
+	// Steal if stale OR holder dead — matches the original intent.
+	return { canSteal: isStale || !isAlive };
+}
+
+/**
  * Lock file kinds. Discriminator written to the lock file payload so that:
  *   - Debugging tools (e.g. a future `pi-crew locks` command) can identify
  *     what a lock is protecting.
@@ -180,9 +231,10 @@ function acquireLockWithRetry(filePath: string, staleMs: number, kind: LockKind 
 			if (Date.now() > deadline) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
-			const isStale = isLockStale(filePath, staleMs);
-			const isHolderAlive = isLockHolderAlive(filePath);
-			if (!isStale && isHolderAlive) {
+			// Round 26 (BUG 1): single-snapshot read closes the TOCTOU window between
+			// separate stale + alive reads (which could race stale→fresh).
+			const { canSteal } = readLockSnapshot(filePath, staleMs);
+			if (!canSteal) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
 			// Stale or dead holder — forcibly remove the lock.
@@ -213,9 +265,9 @@ async function acquireLockWithRetryAsync(filePath: string, staleMs: number, kind
 			if (Date.now() > deadline) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
-			const isStale = isLockStale(filePath, staleMs);
-			const isHolderAlive = isLockHolderAlive(filePath);
-			if (!isStale && isHolderAlive) {
+			// Round 26 (BUG 1): single-snapshot read (see sync variant).
+			const { canSteal } = readLockSnapshot(filePath, staleMs);
+			if (!canSteal) {
 				throw new Error(`Run '${path.basename(filePath)}' is locked by another operation.`);
 			}
 			// Stale or dead holder — forcibly remove the lock.
@@ -244,16 +296,14 @@ export function withFileLockSync<T>(filePath: string, fn: () => T, options: RunL
 	// Between mkdir and lock acquisition, an attacker could plant a symlink.
 	if (!isSymlinkSafePath(path.dirname(lockFile))) throw new Error("Refusing: parent of lock directory is a symlink");
 	fs.mkdirSync(path.dirname(lockFile), { recursive: true });
-	// FIX: Validate that the target file still exists. If it was deleted and
-	// recreated since the last lock cycle, the old .lock file may be orphaned
-	// and should not block the new cycle. Clean it up if the target is missing.
-	try {
-		fs.statSync(filePath);
-	} catch {
-		// Target file doesn't exist — clean up any stale .lock file and proceed.
-		// The lock will be acquired fresh for the new file (if fn creates it).
-		try { fs.rmSync(lockFile, { force: true }); } catch { /* ignore */ }
-	}
+	// Round 26 (BUG 2): REMOVED the pre-acquisition target-file-existence check.
+	// It was racy — between statSync(target) and acquire, a concurrent process
+	// could acquire the lock to CREATE the target, and we'd delete its active
+	// lock. It was also actively wrong for callers that pass a path already
+	// ending in `.lock` (config.ts: the checked "target" never exists, so the
+	// cleanup ALWAYS fired, deleting a fresh concurrent holder's lock). Genuine
+	// orphan locks (crashed holder) are reclaimed by acquireLockWithRetry's
+	// staleMs-based steal logic after at most `staleMs`.
 	// FIX (TOCTOU): Re-validate symlink safety before each lock acquisition
 	// attempt. Between our initial check and the acquisition (and between
 	// acquireLockWithRetry's internal retries), an attacker could plant a
