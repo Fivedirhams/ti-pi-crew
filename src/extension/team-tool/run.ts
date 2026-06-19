@@ -82,6 +82,36 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	if (!goal) return result("Run requires goal or task.", { action: "run", status: "error" }, true);
 	const intentPrefix = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal;
 
+	// AUTO-GENERATE TASK-ID: If no taskId provided, generate one
+	let taskId = params.taskId;
+	if (!taskId) {
+		const osModule = await import("node:os");
+		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
+		const indexPath = path.join(piOpsDir, 'index.json');
+		try {
+			fs.mkdirSync(piOpsDir, { recursive: true });
+			let indexData = { version: "1.0", task_counter: 0, tasks: {} };
+			if (fs.existsSync(indexPath)) {
+				try { indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8')); }
+				catch { /* use default */ }
+			}
+			indexData.task_counter = (indexData.task_counter || 0) + 1;
+			taskId = `task-${String(indexData.task_counter).padStart(3, '0')}`;
+			indexData.tasks[taskId] = {
+				id: taskId,
+				title: goal.slice(0, 100),
+				status: "todo",
+				created_at: new Date().toISOString()
+			};
+			fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
+			console.log(`[piOps] Created task: ${taskId}`);
+			// Pass taskId to params for downstream use
+			(params as any).taskId = taskId;
+		} catch (e) {
+			console.log('[piOps] Could not create task:', e);
+		}
+	}
+
 	// P0: Ensure .crew directory structure exists before creating any manifests.
 	// Dynamic import to avoid module binding issues in child-process contexts.
 	const workingDir = ctx.cwd ?? process.cwd();
