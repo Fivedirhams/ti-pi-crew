@@ -81,6 +81,9 @@ import {
 } from "../ui/powerbar-publisher.ts";
 import { RenderScheduler } from "../ui/render-scheduler.ts";
 import { runEventBus } from "../ui/run-event-bus.ts";
+import { extractPathFromInput, validateWrittenFile, buildValidationBlocker } from "../runtime/per-write-validator.ts";
+import { startRuntimeWarmup } from "../runtime/runtime-warmup.ts";
+import { primePeerDep } from "../runtime/peer-dep.ts";
 import { createRunSnapshotCache } from "../ui/run-snapshot-cache.ts";
 import { closeWatcher } from "../utils/fs-watch.ts";
 import { RunWatcherRegistry } from "../utils/run-watcher-registry.ts";
@@ -196,6 +199,17 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 	const disposeI18n = initI18n(pi);
 	resetTimings();
 	time("register:start");
+	// Under the tsx loader, concurrent first-imports race module-record
+	// instantiation → `Cannot read properties of undefined (reading '<X>')` for
+	// ANY named import (observed: existsSync, validateWorkflowForTeam).
+	// Warming the graph here + awaiting it at spawn boundaries eliminates the
+	// race window. See src/runtime/runtime-warmup.ts.
+	startRuntimeWarmup();
+	// FIX (split-scope install): preload the ESM peer dep so discover-skills /
+	// skill-instructions can read the REAL getAgentDir (fork-aware) from cache.
+	// Fire-and-forget: getAgentDir() falls back to a safe computed default until
+	// this resolves. See src/runtime/peer-dep.ts.
+	primePeerDep().catch(() => {});
 	// Deploy bundled themes (crew-dark, crew-dracula, etc.) to ~/.pi/agent/themes/
 	// so Pi's theme loader discovers them. Best-effort, idempotent.
 	deployBundledThemes();
@@ -1971,6 +1985,27 @@ export function registerPiTeams(pi: ExtensionAPI): void {
 			block: true,
 			reason: `Destructive action '${action}' requires confirm=true${action === "delete" ? " (or force=true to bypass reference checks)" : ""}.`,
 		};
+	});
+
+	// T5 (v0.8.5): per-write validation. On write/edit, run a zero-cost
+	// SYNCHRONOUS validator (v1: JSON.parse) and append a 🔴 blocker to the
+	// tool result on failure — catches malformed config the moment it's
+	// written, not at the next load. Latency-safe by construction: no process
+	// spawn, one disk read ONLY for validated extensions, dedup'd by content.
+	// Toggle via runtime.reliability.perWriteValidation (default true).
+	// Process-spawning validators (.js/.sh/.py) are a future opt-in.
+	pi.on("tool_result", (event, ctx) => {
+		try {
+			if (event.toolName !== "write" && event.toolName !== "edit") return;
+			if (loadConfig(ctx.cwd).config.reliability?.perWriteValidation === false) return;
+			const filePath = extractPathFromInput(event.input);
+			if (!filePath) return;
+			const result = validateWrittenFile(filePath);
+			if (!result || result.ok) return;
+			return { content: [...event.content, buildValidationBlocker(filePath, result.error ?? "validation failed")] };
+		} catch {
+			// best-effort: never break a tool result
+		}
 	});
 
 	registerTeamTool(pi, {

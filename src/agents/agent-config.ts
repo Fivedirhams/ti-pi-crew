@@ -117,6 +117,54 @@ export function getAgentSessionOptions(role: string): {
 }
 
 /**
+ * F1 unify (v0.8.0): the single source of truth for a worker's tool policy,
+ * used by BOTH spawn paths (child-pi `pi-args.ts` and live-session
+ * `live-session-runtime.ts`). Before this, the two paths disagreed:
+ *   - child-pi: `roleConfig.tools ?? agent.tools` (role authoritative)
+ *   - live-session: `agent.tools` only (frontmatter authoritative, role ignored)
+ * so the same agent behaved differently depending on the runtime. A user
+ * defining `tools:` or `disallowed_tools:` in a custom agent's frontmatter
+ * saw it honored on one path and ignored on the other.
+ *
+ * Unified semantics (stable across both paths):
+ *   - **allowlist precedence is source-aware**:
+ *     - `source === "builtin"` → role-config authoritative (security: a
+ *       builtin explorer MUST stay read-only even if its frontmatter is
+ *       loose). Frontmatter is the fallback when the role has no allowlist.
+ *     - `source !== "builtin"` (user / project) → frontmatter `tools:`
+ *       authoritative (user intent). Role-config is the fallback.
+ *   - **denylist is additive**: `roleConfig.excludeTools` and
+ *     `agent.disallowedTools` are MERGED (dedup, order-insensitive). It is
+ *     always safe to forbid more, and merging means a security exclude
+ *     from the role can never be weakened by a frontmatter omission.
+ *
+ * Returns `{ tools, excludeTools }` where each is `undefined` when no
+ * restriction of that kind applies (so callers no-op cleanly).
+ */
+export interface ResolvedToolPolicy {
+	/** Allowlist; undefined = no allowlist restriction (all built-ins allowed). */
+	tools?: string[];
+	/** Denylist (additive); undefined = no denylist. */
+	excludeTools?: string[];
+}
+
+function uniqueToolMerge(...lists: Array<string[] | undefined>): string[] | undefined {
+	const merged = [...new Set(lists.flatMap((list) => list ?? []))];
+	return merged.length > 0 ? merged : undefined;
+}
+
+export function resolveToolPolicy(agent: AgentConfig, role?: string): ResolvedToolPolicy {
+	const roleConfig = role ? getToolConfig(role) : {};
+	// allowlist: source-aware precedence (see doc above).
+	const explicitTools = agent.source === "builtin"
+		? (roleConfig.tools ?? agent.tools)
+		: (agent.tools ?? roleConfig.tools);
+	// denylist: additive merge of role excludeTools + agent disallowedTools.
+	const excludeTools = uniqueToolMerge(roleConfig.excludeTools, agent.disallowedTools);
+	return { tools: explicitTools, excludeTools };
+}
+
+/**
  * Build agent session options including role-based tool restrictions.
  * @param agent - The agent configuration
  * @param role - The role name to use for tool restrictions (defaults to agent.name)

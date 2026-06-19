@@ -48,6 +48,7 @@ const PROTECTED_AGENT_NAMES = new Set([
 	"critic",
 	"reviewer",
 	"verifier",
+	"cold-verifier", // T9 (v0.8.4): adversarial cold cross-check agent
 	"writer",
 	"security-reviewer",
 ]);
