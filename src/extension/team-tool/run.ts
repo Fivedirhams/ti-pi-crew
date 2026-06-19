@@ -88,10 +88,13 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	const { ensureCrewDirectory } = await import("../../state/crew-init.ts");
 	await ensureCrewDirectory(workingDir);
 
-	// CONTEXT COMPACTION RECOVERY: Check if there's an active run in runs.json
+	// Add os import at runtime for piOps path
+	const osModule = await import("node:os");
+
+	// CONTEXT COMPACTION RECOVERY: Check if there's an active run in ~/.pi/agent/piops/runs.json
 	// that we can resume after context compaction
 	try {
-		const piOpsDir = path.join(workingDir, 'piOps');
+		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
 		const runsPath = path.join(piOpsDir, 'runs.json');
 		if (fs.existsSync(runsPath)) {
 			const runsData = fs.readFileSync(runsPath, 'utf-8');

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import type { AgentConfig } from "../agents/agent-config.ts";
 import type { CrewLimitsConfig, CrewRuntimeConfig } from "../config/config.ts";
 import type {
@@ -256,9 +257,9 @@ export async function runTeamTask(
 		});
 		const permissionMode = permissionForRole(task.role);
 
-		// PI-OPS LOGGING: Write to runs.json for task/run tracking
+		// PI-OPS LOGGING: Write to ~/.pi/agent/piops/runs.json for task/run tracking
 		try {
-			const piOpsDir = path.join(task.cwd, 'piOps');
+			const piOpsDir = path.join(os.homedir(), '.pi', 'agent', 'piops');
 			if (!fs.existsSync(piOpsDir)) {
 				fs.mkdirSync(piOpsDir, { recursive: true });
 			}
