@@ -265,6 +265,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 		goal,
 		workspaceMode: params.workspaceMode,
 		ownerSessionId: ctx.sessionId,
+		taskId: taskId, // Pass taskId for agent naming (task-001_role)
 	});
 	const goalArtifact = writeArtifact(paths.artifactsRoot, {
 		kind: "prompt",
@@ -340,6 +341,10 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 				`pi-crew run ${completed.manifest.status}: ${completed.manifest.runId} (${team.name})`,
 				`Goal: ${goal.slice(0, 100)}`,
 			];
+			// Show taskId for user awareness
+			if (taskId) {
+				lines.push(`Task: ${taskId}`);
+			}
 			if (metrics) {
 				lines.push("");
 				lines.push(`Metrics: ${metrics.completedCount}/${metrics.taskCount} tasks, ${metrics.totalTokens} tokens, ${metrics.durationMs}ms, consistency=${metrics.consistencyScore}`);
