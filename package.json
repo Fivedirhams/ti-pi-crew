@@ -1,20 +1,20 @@
 {
-  "name": "pi-crew",
-  "version": "0.7.9",
-  "description": "Pi extension for coordinated AI teams, workflows, worktrees, and async task orchestration",
-  "author": "baphuongna",
+  "name": "ti-pi-crew",
+  "version": "0.7.14",
+  "description": "Ti-pi-crew: Pi extension for coordinated AI teams with task tracking",
+  "author": "Fivedirhams",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/baphuongna/pi-crew.git"
+    "url": "git+https://github.com/Fivedirhams/ti-pi-crew.git"
   },
-  "homepage": "https://github.com/baphuongna/pi-crew#readme",
+  "homepage": "https://github.com/Fivedirhams/ti-pi-crew#readme",
   "bugs": {
-    "url": "https://github.com/baphuongna/pi-crew/issues"
+    "url": "https://github.com/Fivedirhams/ti-pi-crew/issues"
   },
   "type": "module",
   "bin": {
-    "pi-crew": "install.mjs"
+    "ti-pi-crew": "install.mjs"
   },
   "keywords": [
     "pi-package",
