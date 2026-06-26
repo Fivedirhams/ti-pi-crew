@@ -27,6 +27,17 @@ export { activeWidgetRuns, statusSummary } from "./widget-model.ts";
 export { buildWidgetLines as buildCrewWidgetLines, widgetHeader } from "./widget-renderer.ts";
 export { notificationBadge } from "./widget-formatters.ts";
 
+// Tasks widget exports
+export { 
+	TasksWidgetComponent, 
+	updateTasksWidget, 
+	stopTasksWidget, 
+	buildTasksWidgetLines,
+	DEFAULT_STATE as DEFAULT_TASKS_WIDGET_STATE,
+	TEMPLATES
+} from "./tasks-widget.ts";
+export type { TasksWidgetState, PiOpsIndex, SpecEntry, TaskEntry, RunEntry } from "./tasks-widget.ts";
+
 // ── Constants ─────────────────────────────────────────────────────────
 
 const MAX_LINES_DEFAULT = DEFAULT_UI.widgetMaxLines;

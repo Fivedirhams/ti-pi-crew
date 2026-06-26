@@ -46,6 +46,7 @@ import { printTimings, time } from "../../utils/timings.ts";
 import { requestRenderTarget } from "../../ui/pi-ui-compat.ts";
 import type { createRunSnapshotCache } from "../../ui/run-snapshot-cache.ts";
 import type { MetricRegistry } from "../../observability/metric-registry.ts";
+import { updateTasksWidget, stopTasksWidget, DEFAULT_TASKS_WIDGET_STATE, TEMPLATES } from "../../ui/widget/tasks-widget.ts";
 
 export interface RegisterTeamCommandsDeps {
 	startForegroundRun: (ctx: ExtensionContext, runner: (signal?: AbortSignal) => Promise<void>, runId?: string) => void;
@@ -499,6 +500,63 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 			return;
 		}
 	} });
+
+	// Tasks widget command - показывает активные tasks и quick actions
+	let tasksWidgetState = { ...DEFAULT_TASKS_WIDGET_STATE };
+	let tasksWidgetInterval: ReturnType<typeof setInterval> | undefined;
+
+	pi.registerCommand("tasks", {
+		description: "Open tasks panel: active tasks status and quick actions",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			if (!ctx.hasUI) return;
+			
+			const tokens = args.trim().split(/\s+/).filter(Boolean);
+			const action = tokens[0];
+			
+			// Handle actions
+			if (action === "stop" || action === "close") {
+				if (tasksWidgetInterval) {
+					clearInterval(tasksWidgetInterval);
+					tasksWidgetInterval = undefined;
+				}
+				stopTasksWidget(ctx);
+				tasksWidgetState = { ...DEFAULT_TASKS_WIDGET_STATE };
+				ctx.ui.notify("Tasks panel closed", "info");
+				return;
+			}
+			
+			if (action === "status") {
+				tasksWidgetState.activeTab = "status";
+			} else if (action === "actions" || action === "run") {
+				tasksWidgetState.activeTab = "actions";
+			} else if (action === "tab") {
+				// Toggle tab
+				tasksWidgetState.activeTab = tasksWidgetState.activeTab === "status" ? "actions" : "status";
+			} else if (action === "clear") {
+				tasksWidgetState.inputGoal = "";
+				tasksWidgetState.selectedSpec = null;
+				tasksWidgetState.selectedTask = null;
+				ctx.ui.notify("Tasks form cleared", "info");
+			} else if (action === "spec") {
+				tasksWidgetState.selectedSpec = tokens[1] || null;
+			} else if (action === "task") {
+				tasksWidgetState.selectedTask = tokens[1] || null;
+			} else if (action === "template") {
+				tasksWidgetState.selectedTemplate = tokens[1] || "implementation";
+			} else if (!action) {
+				// Open widget - start refresh interval
+				if (!tasksWidgetInterval) {
+					tasksWidgetInterval = setInterval(() => {
+						updateTasksWidget(ctx, tasksWidgetState);
+					}, 2000);
+				}
+				ctx.ui.notify("Tasks panel opened (Tab to switch, /tasks stop to close)", "info");
+			}
+			
+			// Update widget
+			updateTasksWidget(ctx, tasksWidgetState);
+		}
+	});
 
 	pi.registerCommand("team-mascot", { description: "Show an animated mascot splash", handler: async (args: string, ctx: ExtensionCommandContext) => {
 		if (!ctx.hasUI) return;
