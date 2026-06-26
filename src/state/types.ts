@@ -179,6 +179,12 @@ export interface TeamRunManifest {
 	ownerSessionId?: string;
 	/** pi-crew skill override selected when the run was created. false disables injected skill instructions. */
 	skillOverride?: string[] | false;
+	/** Task ID for tracking (e.g., task-001) */
+	taskId?: string;
+	/** Spec ID for task-spec association (e.g., spec-001) */
+	specId?: string;
+	/** Template used for this run (e.g., implementation, research, planning) */
+	template?: string;
 	/** Resolved runtime/safety mode used for execution. Optional for backward compatibility with older manifests. */
 	runtimeResolution?: RuntimeResolutionState;
 	/** Effective run config snapshot used by async background workers. Optional for backward compatibility. */

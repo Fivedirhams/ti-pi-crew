@@ -125,7 +125,13 @@ export const TeamToolParams = Type.Object({
 		}),
 	),
 	taskId: Type.Optional(
-		Type.String({ description: "Task ID for respond action." }),
+		Type.String({ description: "Task ID for task tracking." }),
+	),
+	specId: Type.Optional(
+		Type.String({ description: "Spec ID for task-spec association." }),
+	),
+	template: Type.Optional(
+		Type.String({ description: "Workflow template: research, planning, implementation, fast-fix, review, spec, specify." }),
 	),
 	message: Type.Optional(
 		Type.String({ description: "Message for respond action." }),

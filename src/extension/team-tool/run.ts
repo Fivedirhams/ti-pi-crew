@@ -83,32 +83,96 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	const intentPrefix = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal;
 
 	// AUTO-GENERATE TASK-ID: If no taskId provided, generate one
+	// Also handle spec_id and template for task-spec association
 	let taskId = params.taskId;
+	const specId = params.specId;
+	const template = params.template ?? params.workflow ?? 'default';
+	
 	if (!taskId) {
 		const osModule = await import("node:os");
 		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
 		const indexPath = path.join(piOpsDir, 'index.json');
 		try {
 			fs.mkdirSync(piOpsDir, { recursive: true });
-			let indexData = { version: "1.0", task_counter: 0, tasks: {} };
+			let indexData = { version: "1.0", spec_counter: 0, task_counter: 0, specs: {}, tasks: {} };
 			if (fs.existsSync(indexPath)) {
 				try { indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8')); }
 				catch { /* use default */ }
 			}
+			
+			// Ensure specs and tasks objects exist (for old index.json format)
+			if (!indexData.specs) indexData.specs = {};
+			if (!indexData.tasks) indexData.tasks = {};
+			if (!indexData.spec_counter) indexData.spec_counter = 0;
+			if (!indexData.task_counter) indexData.task_counter = 0;
+			
+			// Create spec if specId provided but doesn't exist
+			let finalSpecId = specId;
+			if (specId && !indexData.specs[specId]) {
+				indexData.spec_counter = (indexData.spec_counter || 0) + 1;
+				finalSpecId = `spec-${String(indexData.spec_counter).padStart(3, '0')}`;
+				indexData.specs[finalSpecId] = {
+					id: finalSpecId,
+					title: goal.slice(0, 100),
+					version: 1,
+					status: 'active',
+					tasks: [],
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				};
+				console.log(`[piOps] Created spec: ${finalSpecId}`);
+			}
+			
+			// Create task
 			indexData.task_counter = (indexData.task_counter || 0) + 1;
 			taskId = `task-${String(indexData.task_counter).padStart(3, '0')}`;
 			indexData.tasks[taskId] = {
 				id: taskId,
+				spec_id: finalSpecId || null,
+				template: template,
 				title: goal.slice(0, 100),
+				version: 1,
 				status: "todo",
-				created_at: new Date().toISOString()
+				stage: null,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString()
 			};
+			
+			// Add task to spec's task list if spec exists
+			if (finalSpecId && indexData.specs[finalSpecId]) {
+				indexData.specs[finalSpecId].tasks = indexData.specs[finalSpecId].tasks || [];
+				indexData.specs[finalSpecId].tasks.push(taskId);
+				indexData.specs[finalSpecId].updated_at = new Date().toISOString();
+			}
+			
 			fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
-			console.log(`[piOps] Created task: ${taskId}`);
-			// Pass taskId to params for downstream use
+			console.log(`[piOps] Created task: ${taskId} (spec: ${finalSpecId || 'none'}, template: ${template})`);
+			// Pass taskId and specId to params for downstream use
 			(params as any).taskId = taskId;
+			(params as any).specId = finalSpecId;
 		} catch (e) {
 			console.log('[piOps] Could not create task:', e);
+		}
+	}
+	
+	// If task already exists, update its template and spec_id if provided
+	if (taskId && (specId || template)) {
+		const osModule = await import("node:os");
+		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
+		const indexPath = path.join(piOpsDir, 'index.json');
+		try {
+			if (fs.existsSync(indexPath)) {
+				const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+				if (indexData.tasks && indexData.tasks[taskId]) {
+					if (specId) indexData.tasks[taskId].spec_id = specId;
+					if (template) indexData.tasks[taskId].template = template;
+					indexData.tasks[taskId].updated_at = new Date().toISOString();
+					fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
+					console.log(`[piOps] Updated task: ${taskId}`);
+				}
+			}
+		} catch (e) {
+			console.log('[piOps] Could not update task:', e);
 		}
 	}
 
@@ -266,6 +330,8 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 		workspaceMode: params.workspaceMode,
 		ownerSessionId: ctx.sessionId,
 		taskId: taskId, // Pass taskId for agent naming (task-001_role)
+		specId: params.specId ?? (params as any).specId, // Pass specId for task-spec association
+		template: template, // Pass template for workflow type
 	});
 	const goalArtifact = writeArtifact(paths.artifactsRoot, {
 		kind: "prompt",
