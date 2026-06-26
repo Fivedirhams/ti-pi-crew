@@ -28,6 +28,33 @@ async function executeTeamRun(...args: Parameters<typeof ExecuteTeamRunFn>): Pro
 }
 import { spawnBackgroundTeamRun } from "../../subagents/async-entry.ts";
 import { appendEventAsync, readEvents } from "../../state/event-log.ts";
+
+/**
+ * Substitute {variable} placeholders in workflow step tasks.
+ * Variables are taken from manifest and params.
+ */
+function substituteWorkflowVariables(
+	workflow: { steps: Array<{ task?: string }> },
+	manifest: { taskId?: string; specId?: string; template?: string },
+	goal: string,
+): void {
+	const variables: Record<string, string> = {
+		taskId: manifest.taskId || '',
+		specId: manifest.specId || '',
+		template: manifest.template || '',
+		goal: goal,
+		taskPath: `~/.pi/agent/docs/tasks/${manifest.taskId || 'unknown'}.md`,
+		specPath: manifest.specId ? `~/.pi/agent/docs/specs/${manifest.specId}.md` : '',
+	};
+
+	for (const step of workflow.steps) {
+		if (step.task) {
+			step.task = step.task.replace(/\{(\w+)\}/g, (match, key) => {
+				return variables[key] ?? match;
+			});
+		}
+	}
+}
 import { resolveCrewRuntime, runtimeResolutionState } from "../../runtime/runtime-resolver.ts";
 import { normalizeSkillOverride } from "../../runtime/skill-instructions.ts";
 import { expandParallelResearchWorkflow } from "../../runtime/parallel-research.ts";
@@ -147,6 +174,34 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 			
 			fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
 			console.log(`[piOps] Created task: ${taskId} (spec: ${finalSpecId || 'none'}, template: ${template})`);
+			
+			// Create task document file for agent reference
+			const docsDir = path.join(osModule.homedir(), '.pi', 'agent', 'docs', 'tasks');
+			fs.mkdirSync(docsDir, { recursive: true });
+			const taskDocPath = path.join(docsDir, `${taskId}.md`);
+			const taskDocContent = `# Task: ${goal.slice(0, 100)}
+
+## ID
+${taskId}
+
+## Version
+1.0
+
+## Spec
+${finalSpecId || 'none'}
+
+## Template
+${template}
+
+## Description
+${goal}
+
+## Status
+todo
+`;
+			fs.writeFileSync(taskDocPath, taskDocContent);
+			console.log(`[piOps] Created task document: ${taskDocPath}`);
+			
 			// Pass taskId and specId to params for downstream use
 			(params as any).taskId = taskId;
 			(params as any).specId = finalSpecId;
@@ -333,6 +388,10 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 		specId: params.specId ?? (params as any).specId, // Pass specId for task-spec association
 		template: template, // Pass template for workflow type
 	});
+
+	// Substitute variables in workflow step tasks (e.g., {taskId}, {specId}, {taskPath})
+	substituteWorkflowVariables(workflow, manifest, goal);
+
 	const goalArtifact = writeArtifact(paths.artifactsRoot, {
 		kind: "prompt",
 		relativePath: "goal.md",
