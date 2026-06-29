@@ -14,22 +14,22 @@ The Chain workflow enables sequential execution of multiple teams with automatic
 
 ```bash
 # Simple team chain
-pi team run --chain "@research -> @implement -> @review"
+pi team-run --chain "@research -> @implement -> @review"
 
 # With model override
-pi team run --chain "@research -> @implement --model claude-opus-3 -> @review"
+pi team-run --chain "@research -> @implement --model claude-opus-3 -> @review"
 
 # With inline goals
-pi team run --chain '"Research AI trends" -> "Analyze findings" -> "Write report"'
+pi team-run --chain '"Research AI trends" -> "Analyze findings" -> "Write report"'
 
 # Global model override
-pi team run --chain "@step1 -> @step2 -> @step3" --global-model claude-sonnet-4
+pi team-run --chain "@step1 -> @step2 -> @step3" --global-model claude-sonnet-4
 
 # With timeout
-pi team run --chain "@step1 --timeout 60 -> @step2"
+pi team-run --chain "@step1 --timeout 60 -> @step2"
 
 # Continue on error
-pi team run --chain "@step1 -> @step2" --continue-on-error
+pi team-run --chain "@step1 -> @step2" --continue-on-error
 ```
 
 ## Chain Syntax
@@ -155,7 +155,7 @@ interface ChainHistoryEntry {
 ### Research → Implement → Review
 
 ```bash
-pi team run \
+pi team-run \
   --team implementation \
   --workflow chain \
   --chain "@research:gather -> @implement:build -> @review:verify" \
@@ -165,7 +165,7 @@ pi team run \
 ### Multi-Model Pipeline
 
 ```bash
-pi team run \
+pi team-run \
   --chain "@fast-research --model haiku -> @deep-analysis --model opus -> @summary --model sonnet" \
   --goal "Analyze codebase and produce documentation"
 ```
@@ -173,7 +173,7 @@ pi team run \
 ### Error-Tolerant Pipeline
 
 ```bash
-pi team run \
+pi team-run \
   --chain "@step1 -> @step2 -> @step3" \
   --continue-on-error \
   --goal "Run data pipeline with graceful degradation"
@@ -207,7 +207,7 @@ const config: ChainRetryConfig = {
 Chain execution supports budget tracking per step:
 
 ```bash
-pi team run \
+pi team-run \
   --chain "@step1 -> @step2" \
   --budget-total 100000 \
   --budget-warning 80000
@@ -234,7 +234,7 @@ pi team run \
 ### Continue on Error
 
 ```bash
-pi team run --chain "@step1 -> @step2" --continue-on-error
+pi team-run --chain "@step1 -> @step2" --continue-on-error
 ```
 
 - All steps execute regardless of failures
