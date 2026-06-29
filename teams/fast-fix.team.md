@@ -7,5 +7,5 @@ maxConcurrency: 1
 ---
 
 - explorer: agent=explorer найти проблему
-- coder: agent=executor исправить
+- coder: agent=coder исправить
 - verifier: agent=verifier проверить

@@ -10,9 +10,9 @@ maxConcurrency: 3
 - analyst: agent=analyst уточнить требования
 - planner: agent=planner создать план
 - critic: agent=critic критический анализ
-- executor: agent=executor реализовать план
+- executor: agent=coder реализовать план
 - reviewer: agent=reviewer ревью кода
-- security-reviewer: agent=security-reviewer безопасность
+- security-reviewer: agent=sec безопасность
 - tester: agent=tester тесты
 - verifier: agent=verifier верификация
 - writer: agent=writer документация
