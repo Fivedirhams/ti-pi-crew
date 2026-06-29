@@ -1,11 +1,9 @@
 ---
 name: planning
-description: Планирование - анализ требований, архитектура, план
+description: Планирование задач (декомпозиция спеки)
 defaultWorkflow: planning
 workspaceMode: single
 maxConcurrency: 1
 ---
 
-- analyst: agent=analyst анализ требований
-- architect: agent=architect проектирование архитектуры
-- planner: agent=planner создание плана
+- planner: agent=planner создать план

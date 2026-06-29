@@ -1,18 +1,11 @@
 ---
 name: implementation
-description: Полная реализация с параллельными специалистами, критикой и верификацией
+description: Реализация: implement + review + critique
 defaultWorkflow: implementation
 workspaceMode: single
-maxConcurrency: 3
+maxConcurrency: 2
 ---
 
-- explorer: agent=explorer исследовать код
-- analyst: agent=analyst уточнить требования
-- planner: agent=planner создать план
+- coder: agent=coder реализовать
+- reviewer: agent=reviewer проверить качество
 - critic: agent=critic критический анализ
-- coder: agent=coder реализовать план
-- reviewer: agent=reviewer ревью кода
-- sec: agent=sec безопасность
-- tester: agent=tester тесты
-- verifier: agent=verifier верификация
-- writer: agent=writer документация
