@@ -46,7 +46,7 @@ import { printTimings, time } from "../../utils/timings.ts";
 import { requestRenderTarget } from "../../ui/pi-ui-compat.ts";
 import type { createRunSnapshotCache } from "../../ui/run-snapshot-cache.ts";
 import type { MetricRegistry } from "../../observability/metric-registry.ts";
-import { updateTasksWidget, stopTasksWidget, DEFAULT_TASKS_WIDGET_STATE, TEMPLATES } from "../../ui/widget/tasks-widget.ts";
+import { updateTasksWidget, stopTasksWidget, DEFAULT_TASKS_WIDGET_STATE, TEMPLATES, readPiOpsIndex, readRuns } from "../../ui/widget/tasks-widget.ts";
 
 export interface RegisterTeamCommandsDeps {
 	startForegroundRun: (ctx: ExtensionContext, runner: (signal?: AbortSignal) => Promise<void>, runId?: string) => void;
@@ -550,7 +550,22 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 						updateTasksWidget(ctx, tasksWidgetState);
 					}, 2000);
 				}
-				ctx.ui.notify("Tasks panel opened (Tab to switch, /tasks stop to close)", "info");
+				// Also show data in chat as fallback
+				const index = readPiOpsIndex();
+				const runs = readRuns();
+				const taskCount = Object.keys(index.tasks).length;
+				const activeCount = Object.values(index.tasks).filter(t => t.status === 'in_progress').length;
+				const completedCount = Object.values(index.tasks).filter(t => t.status === 'completed').length;
+				let statusText = `📊 TASKS: ${taskCount} total, ${activeCount} active, ${completedCount} completed`;
+				if (taskCount > 0) {
+					statusText += "\n\nTasks:\n";
+					for (const [id, task] of Object.entries(index.tasks)) {
+						const statusIcon = task.status === 'in_progress' ? '🔄' : task.status === 'completed' ? '✅' : task.status === 'failed' ? '❌' : '⏳';
+						statusText += `${statusIcon} ${id}: ${task.title?.slice(0, 40) || '(no title)'} [${task.status}]\n`;
+						if (task.spec_id) statusText += `   📋 spec: ${task.spec_id}, template: ${task.template}\n`;
+					}
+				}
+				ctx.ui.notify(statusText, "info");
 			}
 			
 			// Update widget
