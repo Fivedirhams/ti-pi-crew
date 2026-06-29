@@ -3,6 +3,7 @@ import type { TaskClaimState } from "./task-claims.ts";
 import type { WorkerHeartbeatState } from "../runtime/worker-heartbeat.ts";
 import type { CrewAgentProgress } from "../runtime/crew-agent-runtime.ts";
 import type { RolloutEntry, CoherenceMark } from "./decision-ledger.ts";
+import type { CrashClass } from "../runtime/crash-classification.ts";
 export type { RolloutEntry, CoherenceMark };
 export type { CrewAgentProgress };
 
@@ -116,6 +117,17 @@ export interface WorkerExitStatus {
 	signal?: string;
 	cleanupErrors: string[];
 	finalDrainMs: number;
+	/** Categorical classification of the exit (P0 crash taxonomy). Optional
+	 *  because it is populated by child-pi.ts at settle time; older/synthetic
+	 *  exit statuses may omit it. */
+	crashClass?: CrashClass;
+	/** Phase-0 diagnostic (HB-003a): final-drain race state for the exit-null
+	 *  disableTools bug. Optional + read-only — absent when no drain timer was
+	 *  ever armed. Phase 1 will use `finalDrainArmed` to decide whether a
+	 *  signal-death (exitCode=null) should be treated as a forced final drain. */
+	finalDrainArmed?: boolean;
+	forcedFinalDrain?: boolean;
+	finalDrainFiredMonotonicMs?: number;
 }
 
 export interface OperationTerminalEvidence {
@@ -163,6 +175,12 @@ export interface TeamRunManifest {
 	team: string;
 	workflow?: string;
 	goal: string;
+	/** Task ID for task-spec tracking */
+	taskId?: string;
+	/** Spec ID for task-spec association */
+	specId?: string;
+	/** Workflow template */
+	template?: string;
 	status: TeamRunStatus;
 	workspaceMode: "single" | "worktree";
 	createdAt: string;
@@ -179,18 +197,19 @@ export interface TeamRunManifest {
 	ownerSessionId?: string;
 	/** pi-crew skill override selected when the run was created. false disables injected skill instructions. */
 	skillOverride?: string[] | false;
-	/** Task ID for tracking (e.g., task-001) */
-	taskId?: string;
-	/** Spec ID for task-spec association (e.g., spec-001) */
-	specId?: string;
-	/** Template used for this run (e.g., implementation, research, planning) */
-	template?: string;
 	/** Resolved runtime/safety mode used for execution. Optional for backward compatibility with older manifests. */
 	runtimeResolution?: RuntimeResolutionState;
 	/** Effective run config snapshot used by async background workers. Optional for backward compatibility. */
 	runConfig?: unknown;
+	/** Background dispatch discriminator. Default "team-run" runs executeTeamRun; "goal-loop" / "dynamic-workflow" dispatch to their respective runners. Absent = "team-run" for backward compatibility. */
+	runKind?: "team-run" | "goal-loop" | "dynamic-workflow";
+	/** round-14 P1-5: typed workflow arguments accessible in .dwf.ts scripts via ctx.args<T>(). Any JSON value; default {} when unset. */
+	args?: unknown;
 	summary?: string;
 	policyDecisions?: PolicyDecision[];
+	/** #2 (assessment): goal-achievement verdict — kills the silent false-green. */
+	goalAchieved?: boolean | "unknown";
+	goalAchievementNote?: string;
 }
 
 export interface UsageState {
@@ -200,6 +219,86 @@ export interface UsageState {
 	cacheWrite?: number;
 	cost?: number;
 	turns?: number;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Goal loop types (P0/P1 — autonomous goal loop, Claude-Code-style /goal).
+// Spec: research-findings/goal-workflow/00-SPEC.md §2.3; plan 07-PLAN.md v3 §0b G2 + §0c.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Outer-state lifecycle of a goal loop. Inner per-turn state lives on each turn's TeamRunManifest.
+ *
+ * P1b (RFC v0.5 §P1b): `"stuck"` is NON-TERMINAL and RE-HINTABLE. Legal transitions:
+ *   running → stuck     (only by the background loop, after the oscillation detector fires)
+ *   stuck   → running   (only by `goal resume`, atomically via GoalStore.compareAndSetStatus)
+ *   stuck   → cancelled (by the idle-timeout sweeper OR `goal stop`)
+ */
+export type GoalLoopStatus =
+	| "running"
+	| "paused"
+	| "stuck"
+	| "achieved"
+	| "max_turns"
+	| "budget_exceeded"
+	| "blocked"
+	| "cancelled";
+
+/** One evaluation by the goal-judge model after a turn. */
+export interface GoalVerdict {
+	turn: number;
+	achieved: boolean;
+	/** "achieved: all tests pass" | "not-achieved: 2/8 tests failing" | "BLOCKED: <reason>" (BLOCKED: prefix → status='blocked'). */
+	reason: string;
+	evidenceRefs?: string[];
+	evaluatorModel: string;
+	evaluatedAt: string;
+}
+
+/** Persisted at <crewRoot>/state/goals/<goalId>.json by GoalStore. Survives session restart. */
+export interface GoalLoopState {
+	goalId: string;
+	ownerSessionId: string;
+	objective: string;
+	scope?: string;
+	/** Acceptance conditions as shell commands (exit 0 = pass). Reuses VerificationContract semantics. */
+	verification?: { commands: string[]; allowManualEvidence?: boolean };
+	state: GoalLoopStatus;
+	maxTurns: number;
+	turnsUsed: number;
+	budgetTotal?: number;
+	/** P1d (RFC v0.5 §P1d): when true, budget enforcement is skipped (explicit opt-out; audit-logged at start). */
+	budgetUnlimited?: boolean;
+	budgetWarning?: number;
+	budgetAbort?: number;
+	budgetUsed: number;
+	/**
+	 * P1a (RFC v0.5 §P1a): bookend integrity snapshot of project-manifest files
+	 * taken at goal start (only when verification.commands is declared). The
+	 * goal-loop-runner re-hashes before (T_snap) and after (T_verify_done) each
+	 * verification command to detect persistent manifest tampering. The literal
+	 * `"none-text-only"` marks goals started in text-only verification mode
+	 * (no objective oracle → no snapshot taken).
+	 */
+	verificationIntegrity?:
+		| { snapshot: Record<string, string>; takenAt: string }
+		| "none-text-only";
+	evaluatorModel: string;
+	workerModel?: string;
+	/** subagent_type / agent name for worker turns (default "executor"). */
+	workerAgent?: string;
+	team?: string;
+	cwd: string;
+	/** Feedback from turn N's verdict, prepended into turn N+1's manifest.goal (G1). */
+	nextTurnFeedback?: string;
+	/** The team-run of the current in-flight turn (for cancel/steer). */
+	currentRunId?: string;
+	verdicts: GoalVerdict[];
+	history: { runId: string; outcome: string; learnedAt: string; turn: number }[];
+	createdAt: string;
+	updatedAt: string;
+	/** Mirror of manifest.async for PID-liveness checks (cf. AsyncRunState). */
+	async?: { pid: number; logPath: string; spawnedAt: string };
 }
 
 export interface ModelAttemptState {

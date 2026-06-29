@@ -72,6 +72,12 @@ export const TeamToolParams = Type.Object({
 				Type.Literal("anchor"),
 				Type.Literal("auto-summarize"),
 				Type.Literal("auto_boomerang"),
+				Type.Literal("goal"),
+				Type.Literal("workflow-create"),
+				Type.Literal("workflow-get"),
+				Type.Literal("workflow-list"),
+				Type.Literal("workflow-save"),
+				Type.Literal("workflow-delete"),
 			],
 			{ description: "Team action. Defaults to 'list' when omitted." },
 		),
@@ -108,6 +114,12 @@ export const TeamToolParams = Type.Object({
 	goal: Type.Optional(
 		Type.String({ description: "High-level objective for a team run." }),
 	),
+	chain: Type.Optional(
+		Type.String({
+			description:
+				'Chain expression: "step1 -> step2 -> step3". Runs each step as a sequential team run, passing handoff context forward via the goal text. Supports inline goals ("...") and @team references. e.g. chain=\'"Research X" -> "Analyze" -> "Write report"\'.',
+		}),
+	),
 	task: Type.Optional(
 		Type.String({
 			description: "Concrete task text for direct role/agent execution.",
@@ -125,7 +137,7 @@ export const TeamToolParams = Type.Object({
 		}),
 	),
 	taskId: Type.Optional(
-		Type.String({ description: "Task ID for task tracking." }),
+		Type.String({ description: "Task ID for respond action." }),
 	),
 	specId: Type.Optional(
 		Type.String({ description: "Spec ID for task-spec association." }),
@@ -250,8 +262,14 @@ export const TeamToolParams = Type.Object({
 	budgetTotal: Type.Optional(
 		Type.Number({
 			description:
-				"Total token budget for the run. When set, enables budget tracking with default 80% warning and 95% abort thresholds.",
-			minimum: 1,
+				"Total token budget for the run. When set, enables budget tracking with default 80% warning and 95% abort thresholds. Minimum 1000 — this is a MISCONFIGURATION GUARD (catches typos / silent-abort configs like budgetTotal:1, which would abort on turn 1), NOT a usefulness guarantee; a productive multi-turn goal needs far more than 1000 tokens.",
+			minimum: 1000,
+		}),
+	),
+	budgetUnlimited: Type.Optional(
+		Type.Boolean({
+			description:
+				"When true, skip budget enforcement entirely (explicit opt-out). Goal-start validation requires budgetTotal>=1000 OR budgetUnlimited:true; audit-logged when set. The validation itself is enforced in a later integration task.",
 		}),
 	),
 	budgetWarning: Type.Optional(
@@ -268,6 +286,39 @@ export const TeamToolParams = Type.Object({
 				"Budget abort threshold as a fraction (0-1). Default: 0.95 (95%). Aborts further execution when this threshold is crossed.",
 			minimum: 0,
 			maximum: 1,
+		}),
+	),
+	runKind: Type.Optional(
+		Type.Union(
+			[
+				Type.Literal("team-run"),
+				Type.Literal("goal-loop"),
+				Type.Literal("dynamic-workflow"),
+			],
+			{
+				description:
+					"Background dispatch discriminator. Default \"team-run\" runs the normal executeTeamRun workflow; \"goal-loop\" (P0/P1) and \"dynamic-workflow\" (P2/P3) dispatch to their respective background runners. Absent = \"team-run\" for backward compatibility.",
+			},
+		),
+	),
+	tokenBudget: Type.Optional(
+		Type.Number({
+			description:
+				"Per-workflow token budget for dynamic-workflow runs. When set, ctx.agent() auto-rejects with ok:false once exhausted. Accumulated from each agent run's reported usage. Overrides workflow.maxTokenBudget.",
+			minimum: 0,
+		}),
+	),
+	args: Type.Optional(
+		// round-14 P1-5: typed workflow arguments. Type.Any() generates an empty {} schema
+		// (matches any JSON value) which is strict-provider friendly — no array type union.
+		// Description lives in the JSDoc / TeamToolParamsValue below to avoid the
+		// "description-only schema" strict-provider check.
+		Type.Any(),
+	),
+	focus: Type.Optional(
+		Type.String({
+			description:
+				"Sub-focus for the doctor action. 'zombies' runs a READ-ONLY scan for orphaned pi-crew sub-agent processes (identified by PI_CREW_KIND=subagent); it never kills and never matches the user's interactive main session.",
 		}),
 	),
 });
@@ -318,13 +369,22 @@ export interface TeamToolParamsValue {
 		| "search"
 		| "orchestrate"
 		| "schedule"
-		| "scheduled";
+		| "scheduled"
+		| "goal"
+		| "workflow-create"
+		| "workflow-get"
+		| "workflow-list"
+		| "workflow-save"
+		| "workflow-delete";
 	resource?: "agent" | "team" | "workflow";
 	team?: string;
 	workflow?: string;
 	role?: string;
 	agent?: string;
 	goal?: string;
+	/** Chain expression: "step1 -> step2 -> step3". Runs each step as a sequential
+	 *  team run with handoff context passed forward via the goal. */
+	chain?: string;
 	task?: string;
 	singleAgent?: boolean;
 	runId?: string;
@@ -340,6 +400,10 @@ export interface TeamToolParamsValue {
 	skill?: string | string[] | boolean;
 	scope?: "user" | "project" | "both";
 	config?: Record<string, unknown>;
+	/** Sub-focus for the `doctor` action. `"zombies"` runs a READ-ONLY scan for
+	 *  orphaned pi-crew sub-agent processes (identified by PI_CREW_KIND=subagent);
+	 *  it never kills and never matches the user's interactive main session. */
+	focus?: string;
 	dryRun?: boolean;
 	confirm?: boolean;
 	force?: boolean;
@@ -358,10 +422,18 @@ export interface TeamToolParamsValue {
 	once?: string | number;
 	/** Mark certain bash commands as excludeFromContext to reduce context tokens (default: false). */
 	excludeContextBash?: boolean;
-	/** Total token budget for the run. When set, enables budget tracking. */
+	/** Total token budget for the run. When set, enables budget tracking (minimum 1000). */
 	budgetTotal?: number;
+	/** When true, skip budget enforcement entirely (explicit opt-out). */
+	budgetUnlimited?: boolean;
 	/** Budget warning threshold as a fraction (0-1). Default: 0.8. */
 	budgetWarning?: number;
 	/** Budget abort threshold as a fraction (0-1). Default: 0.95. */
 	budgetAbort?: number;
+	/** Background dispatch discriminator. Default "team-run". "goal-loop"/"dynamic-workflow" dispatch to their runners (P0/P2). */
+	runKind?: "team-run" | "goal-loop" | "dynamic-workflow";
+	/** Per-workflow token budget for dynamic-workflow runs (round-14 P1-2). */
+	tokenBudget?: number;
+	/** Typed workflow arguments for .dwf.ts scripts, accessible via ctx.args<T>() (round-14 P1-5). */
+	args?: unknown;
 }

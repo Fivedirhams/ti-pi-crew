@@ -1,7 +1,7 @@
 {
   "name": "ti-pi-crew",
-  "version": "0.7.14",
-  "description": "Ti-pi-crew: Pi extension for coordinated AI teams with task tracking",
+  "version": "0.9.14.0",
+  "description": "Pi extension for coordinated AI teams, workflows, worktrees, and async task orchestration",
   "author": "Fivedirhams",
   "license": "MIT",
   "repository": {
@@ -10,11 +10,11 @@
   },
   "homepage": "https://github.com/Fivedirhams/ti-pi-crew#readme",
   "bugs": {
-    "url": "https://github.com/Fivedirhams/ti-pi-crew/issues"
+    "url": "https://github.com/baphuongna/pi-crew/issues"
   },
   "type": "module",
   "bin": {
-    "ti-pi-crew": "install.mjs"
+    "pi-crew": "install.mjs"
   },
   "keywords": [
     "pi-package",
@@ -39,6 +39,7 @@
     "docs/",
     "tsconfig.json",
     "schema.json",
+    "types/",
     "CHANGELOG.md",
     "LICENSE",
     "NOTICE.md"
@@ -52,6 +53,7 @@
     "test:unit": "node scripts/test-runner.mjs --test-concurrency=4 --test-timeout=180000 --test-force-exit test/unit/*.test.ts",
     "test:watch": "tsx --watch --test --test-concurrency=4 --test-timeout=30000 --test-force-exit test/unit/*.test.ts",
     "test:integration": "node scripts/test-runner.mjs --test-concurrency=1 --test-timeout=120000 test/integration/*.test.ts",
+    "test:smoke": "node scripts/test-runner.mjs --test-concurrency=1 --test-timeout=180000 test/smoke/*.smoke.ts",
     "build:bundle": "node scripts/build-bundle.mjs",
     "bench": "node scripts/run-bench.mjs",
     "bench:check": "node scripts/bench-check.mjs",
@@ -63,7 +65,10 @@
     "smoke:release": "node scripts/release-smoke.mjs"
   },
   "exports": {
-    "./schema.json": "./schema.json"
+    "./schema.json": "./schema.json",
+    "./workflow": {
+      "types": "./types/dwf.d.ts"
+    }
   },
   "pi": {
     "extensions": [
@@ -81,12 +86,12 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49",
-    "acorn": "^8.16.0",
+    "acorn": "^8.17.0",
     "ajv": "^8.20.0",
     "cli-highlight": "^2.1.11",
     "diff": "^5.2.0",
     "jiti": "^2.7.0",
-    "typebox": "^1.1.38"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",

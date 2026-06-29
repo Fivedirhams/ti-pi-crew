@@ -1,6 +1,4 @@
 import { allAgents, discoverAgents } from "../../agents/discover-agents.ts";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { allTeams, discoverTeams } from "../../teams/discover-teams.ts";
 import { allWorkflows, discoverWorkflows } from "../../workflows/discover-workflows.ts";
 import { loadConfig } from "../../config/config.ts";
@@ -17,6 +15,7 @@ import type { executeTeamRun as ExecuteTeamRunFn } from "../../runtime/team-runn
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- type-only import for TS inference
 const _typeCheck: typeof ExecuteTeamRunFn = null as never as typeof ExecuteTeamRunFn;
 import { logInternalError } from "../../utils/internal-error.ts";
+import { resolveRealContainedPath } from "../../utils/safe-paths.ts";
 let _cachedExecuteTeamRun: typeof ExecuteTeamRunFn | undefined;
 async function executeTeamRun(...args: Parameters<typeof ExecuteTeamRunFn>): Promise<Awaited<ReturnType<typeof ExecuteTeamRunFn>>> {
 	if (!_cachedExecuteTeamRun) {
@@ -28,42 +27,53 @@ async function executeTeamRun(...args: Parameters<typeof ExecuteTeamRunFn>): Pro
 }
 import { spawnBackgroundTeamRun } from "../../subagents/async-entry.ts";
 import { appendEventAsync, readEvents } from "../../state/event-log.ts";
-
-/**
- * Substitute {variable} placeholders in workflow step tasks.
- * Variables are taken from manifest and params.
- */
-function substituteWorkflowVariables(
-	workflow: { steps: Array<{ task?: string }> },
-	manifest: { taskId?: string; specId?: string; template?: string },
-	goal: string,
-): void {
-	const variables: Record<string, string> = {
-		taskId: manifest.taskId || '',
-		specId: manifest.specId || '',
-		template: manifest.template || '',
-		goal: goal,
-		taskPath: `~/.pi/agent/docs/tasks/${manifest.taskId || 'unknown'}.md`,
-		specPath: manifest.specId ? `~/.pi/agent/docs/specs/${manifest.specId}.md` : '',
-	};
-
-	for (const step of workflow.steps) {
-		if (step.task) {
-			step.task = step.task.replace(/\{(\w+)\}/g, (match, key) => {
-				return variables[key] ?? match;
-			});
-		}
-	}
-}
 import { resolveCrewRuntime, runtimeResolutionState } from "../../runtime/runtime-resolver.ts";
 import { normalizeSkillOverride } from "../../runtime/skill-instructions.ts";
 import { expandParallelResearchWorkflow } from "../../runtime/parallel-research.ts";
+
+/**
+ * Module-scoped latch for the crew-init dynamic import.
+ *
+		// LAZY: defer dynamic import of module to its call site.
+ * `crew-init.ts` is dynamically `await import()`'d from `handleRun` below, which
+ * N concurrent subagents hit simultaneously (every `team` tool call runs it).
+ * Under the tsx/jiti loader, concurrent first-imports race module-record
+ * instantiation → top-level `const` initializers (e.g. CREW_README) hit TDZ
+ * (`Cannot access 'CREW_README' before initialization`) and namespace bindings
+ * arrive as `undefined` (`reading 'existsSync'`). crew-init.ts's own header
+ * documents this for the `path` binding; the race persists for other top-level
+ * consts because module-body evaluation itself races.
+ *
+ * The latch makes concurrent callers share ONE in-flight import promise, so the
+ * module body evaluates exactly once regardless of fanout. Same pattern as
+ * runtime-warmup.ts / the v0.8.1 peer-dep latch, applied to this specific
+ * dynamic-import race site.
+ *
+ * IMPORTANT: must be `var` (not `let`) — when this module is loaded via
+ * `jiti.import()` (the pi extension loader) wrapped in an async function,
+ * `let` causes a Temporal Dead Zone error because the function declaration
+ * below is hoisted and can be called before this `let` line executes under
+ * certain microtask schedules. `var` is hoisted with `undefined`, avoiding
+ * the TDZ. Round-11 cold review reproduction:
+ *   `team action='run' workflow='<dynamic>'` → "Cannot access 'crewInitPromise'
+ *    before initialization" at run.ts load. See RFC 17 + commit fixing this.
+ */
+var crewInitPromise: Promise<typeof import("../../state/crew-init.ts")> | undefined;
+function loadCrewInit(): Promise<typeof import("../../state/crew-init.ts")> {
+	if (!crewInitPromise) {
+		crewInitPromise = import("../../state/crew-init.ts");
+	}
+	return crewInitPromise;
+}
 import { checkProcessLiveness, isActiveRunStatus } from "../../runtime/process-status.ts";
 import { waitForRun } from "../../runtime/run-tracker.ts";
 import { hasAsyncStartMarker } from "../../runtime/async-marker.ts";
 import { collectRunMetrics } from "../../state/run-metrics.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { PiTeamsToolResult } from "../tool-result.ts";
 import { buildParentContext, result, type TeamContext } from "./context.ts";
+import { isGoalWrapEnabled, shouldGoalWrap, startGoalWrappedRun } from "./goal-wrap.ts";
 import { effectiveRunConfig } from "./config-patch.ts";
 
 function tailFile(filePath: string, maxBytes = 4096): string | undefined {
@@ -103,35 +113,45 @@ function scheduleBackgroundEarlyExitGuard(cwd: string, runId: string, pid: numbe
 }
 
 export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): Promise<PiTeamsToolResult> {
+	// CHAIN DISPATCH: runs before goal validation since a chain has no top-level
+	// goal. The injected handleRun reference breaks the run.ts ↔ chain-dispatch.ts
+	// import cycle; the lazy import defers the chain-executor cost until a chain is
+	// actually requested. Existing run/workflow paths below are unchanged.
+	if (params.chain) {
+		// LAZY: defer chain-dispatch import until a chain is actually requested.
+		const { handleChainRun } = await import("./chain-dispatch.ts");
+		return handleChainRun(params, ctx, handleRun);
+	}
 	const goal = params.goal ?? params.task;
 	if (!goal) return result("Run requires goal or task.", { action: "run", status: "error" }, true);
-	const intentPrefix = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal;
 
 	// AUTO-GENERATE TASK-ID: If no taskId provided, generate one
 	// Also handle spec_id and template for task-spec association
+	const osModule = await import("node:os");
+	const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
+	const docsDir = path.join(osModule.homedir(), '.pi', 'agent', 'docs', 'tasks');
+	
 	let taskId = params.taskId;
 	const specId = params.specId;
 	const template = params.template ?? params.workflow ?? 'default';
 	
+	// piOps: Load or create index
+	const indexPath = path.join(piOpsDir, 'index.json');
+	let indexData = { version: "1.0", spec_counter: 0, task_counter: 0, specs: {}, tasks: {} };
+	if (fs.existsSync(indexPath)) {
+		try { indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8')); }
+		catch { /* use default */ }
+	}
+	
+	// Ensure objects exist
+	if (!indexData.specs) indexData.specs = {};
+	if (!indexData.tasks) indexData.tasks = {};
+	if (!indexData.spec_counter) indexData.spec_counter = 0;
+	if (!indexData.task_counter) indexData.task_counter = 0;
+	
 	if (!taskId) {
-		const osModule = await import("node:os");
-		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
-		const indexPath = path.join(piOpsDir, 'index.json');
-		try {
-			fs.mkdirSync(piOpsDir, { recursive: true });
-			let indexData = { version: "1.0", spec_counter: 0, task_counter: 0, specs: {}, tasks: {} };
-			if (fs.existsSync(indexPath)) {
-				try { indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8')); }
-				catch { /* use default */ }
-			}
-			
-			// Ensure specs and tasks objects exist (for old index.json format)
-			if (!indexData.specs) indexData.specs = {};
-			if (!indexData.tasks) indexData.tasks = {};
-			if (!indexData.spec_counter) indexData.spec_counter = 0;
-			if (!indexData.task_counter) indexData.task_counter = 0;
-			
-			// Create spec if specId provided but doesn't exist
+		// AUTO-GENERATE: Only if not provided
+		// Create spec if specId provided but doesn't exist
 			let finalSpecId = specId;
 			if (specId && !indexData.specs[specId]) {
 				indexData.spec_counter = (indexData.spec_counter || 0) + 1;
@@ -163,7 +183,7 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 				updated_at: new Date().toISOString()
 			};
 			
-			// Add task to spec's task list if spec exists
+			// Add task to spec's task list
 			if (finalSpecId && indexData.specs[finalSpecId]) {
 				indexData.specs[finalSpecId].tasks = indexData.specs[finalSpecId].tasks || [];
 				indexData.specs[finalSpecId].tasks.push(taskId);
@@ -172,14 +192,8 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 			
 			fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
 			console.log(`[piOps] Created task: ${taskId} (spec: ${finalSpecId || 'none'}, template: ${template})`);
-		}
-	}
-	
-	// Re-export updateTaskStatus from standalone module
-	export { updateTaskStatus } from "./task-status.ts";
 			
-			// Create task document file for agent reference
-			const docsDir = path.join(osModule.homedir(), '.pi', 'agent', 'docs', 'tasks');
+			// Create task document
 			fs.mkdirSync(docsDir, { recursive: true });
 			const taskDocPath = path.join(docsDir, `${taskId}.md`);
 			const taskDocContent = `# Task: ${goal.slice(0, 100)}
@@ -204,63 +218,23 @@ todo
 `;
 			fs.writeFileSync(taskDocPath, taskDocContent);
 			console.log(`[piOps] Created task document: ${taskDocPath}`);
-			
-			// Pass taskId and specId to params for downstream use
-			(params as any).taskId = taskId;
-			(params as any).specId = finalSpecId;
 		} catch (e) {
-			console.log('[piOps] Could not create task:', e);
+			console.log('[piOps] Warning: could not create task:', e);
 		}
 	}
 	
-	// If task already exists, update its template and spec_id if provided
-	if (taskId && (specId || template)) {
-		const osModule = await import("node:os");
-		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
-		const indexPath = path.join(piOpsDir, 'index.json');
-		try {
-			if (fs.existsSync(indexPath)) {
-				const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-				if (indexData.tasks && indexData.tasks[taskId]) {
-					if (specId) indexData.tasks[taskId].spec_id = specId;
-					if (template) indexData.tasks[taskId].template = template;
-					indexData.tasks[taskId].updated_at = new Date().toISOString();
-					fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
-					console.log(`[piOps] Updated task: ${taskId}`);
-				}
-			}
-		} catch (e) {
-			console.log('[piOps] Could not update task:', e);
-		}
-	}
+	// Pass taskId to params for downstream use
+	(params as any).taskId = taskId;
+	
+	const intentPrefix = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal;
 
 	// P0: Ensure .crew directory structure exists before creating any manifests.
-	// Dynamic import to avoid module binding issues in child-process contexts.
+	// Latched dynamic import (loadCrewInit) — concurrent `team` tool calls from
+	// N subagents share ONE in-flight promise so crew-init.ts's module body
+	// evaluates exactly once (avoids the cold-start race on CREW_README / path / fs).
 	const workingDir = ctx.cwd ?? process.cwd();
-	const { ensureCrewDirectory } = await import("../../state/crew-init.ts");
+	const { ensureCrewDirectory } = await loadCrewInit();
 	await ensureCrewDirectory(workingDir);
-
-	// Add os import at runtime for piOps path
-	const osModule = await import("node:os");
-
-	// CONTEXT COMPACTION RECOVERY: Check if there's an active run in ~/.pi/agent/piops/runs.json
-	// that we can resume after context compaction
-	try {
-		const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
-		const runsPath = path.join(piOpsDir, 'runs.json');
-		if (fs.existsSync(runsPath)) {
-			const runsData = fs.readFileSync(runsPath, 'utf-8');
-			const runs: Array<{id: string; task_id: string; status: string}> = JSON.parse(runsData);
-			const activeRun = runs.find(r => r.status === 'started');
-			if (activeRun) {
-				console.log(`[Recovery] Found active run: ${activeRun.id} for task: ${activeRun.task_id}`);
-				// Could set ctx.taskId = activeRun.task_id here if needed
-			}
-		}
-	} catch (e) {
-		// Ignore errors - recovery is best-effort
-		console.log('[Recovery] Could not check for active runs:', e);
-	}
 
 	// WORKTREE FIX: If worktree mode is needed but cwd is not a git repo,
 	// auto-correct to the nearest git repo root. This prevents "not a git repository"
@@ -335,7 +309,33 @@ todo
 		steps: [{ id: "01_agent", role: params.role ?? "agent", task: "{goal}", model: params.model }],
 	} : workflows.find((item) => item.name === workflowName);
 	if (!baseWorkflow) return result(`Workflow '${workflowName}' not found.`, { action: "run", status: "error" }, true);
-	const workflow = directAgent ? baseWorkflow : expandParallelResearchWorkflow(baseWorkflow, resolvedCtx.cwd);
+	// LAZY: dodge the jiti ESM/CJS interop TDZ race on the static `import { expandParallelResearchWorkflow }` above (issue #28, RFC 17). At call time the module body has fully evaluated, so the dynamic import returns a live binding.
+	const { expandParallelResearchWorkflow: expandParallelResearch } = await import("../../runtime/parallel-research.ts");
+	const workflow = directAgent ? baseWorkflow : expandParallelResearch(baseWorkflow, resolvedCtx.cwd);
+
+	// RFC v0.5 vision: goal-wrap. If .crew/config.json has goalWrap[workflow.name].enabled=true,
+	// route to a goal loop where this workflow runs as the worker turn (judge → feedback → redo
+	// until achieved). Only for eligible builtins (implementation, fast-fix, default). Per-workflow
+	// toggle; OFF by default. See goal-wrap.ts.
+	//
+	// SAFETY (commit b57bad3): multi-step workflows crash non-deterministically
+	// in the background goal-loop process (V8/libuv race in team-runner batch
+	// transition). When goal-wrap is unsafe for this workflow, we do NOT error
+	// out — we fall through to the normal team-run path so the user still gets
+	// the run they asked for. The disabled reason is logged for traceability.
+	if (!directAgent && workflow.source === "builtin" && isGoalWrapEnabled(resolvedCtx.cwd, workflow.name)) {
+		const decision = shouldGoalWrap(resolvedCtx.cwd, workflow);
+		if (decision.enabled) {
+			return await startGoalWrappedRun(params, ctx, workflow, goal);
+		}
+		// goal-wrap disabled for this workflow — fall through silently to normal
+		// team-run path. Log the reason so it's discoverable in events.jsonl and
+		// debug logs. This preserves the trace of WHY goal-wrap was bypassed for
+		// a given run (vs. just disappearing without explanation).
+		if (decision.message) {
+			logInternalError("team-tool.run.goalWrapBypassed", new Error(decision.message), `workflow=${workflow.name} reason=${decision.reason}`);
+		}
+	}
 
 	// Check if this is a pipeline workflow - special handling for multi-stage execution
 	const isPipelineWorkflow = workflowName === "pipeline" && !directAgent;
@@ -374,12 +374,16 @@ todo
 		].join("\n"), { action: "run", status: "ok" }, false);
 	}
 
-	const validationErrors = validateWorkflowForTeam(workflow, team);
+	// LAZY: dodge the jiti ESM/CJS interop TDZ race on the static `import { validateWorkflowForTeam }` above (issue #28, RFC 17).
+	const { validateWorkflowForTeam: validateWorkflow } = await import("../../workflows/validate-workflow.ts");
+	const validationErrors = validateWorkflow(workflow, team);
 	if (validationErrors.length > 0) {
 		return result([`Workflow '${workflow.name}' is not valid for team '${team.name}':`, ...validationErrors.map((error) => `- ${error}`)].join("\n"), { action: "run", status: "error" }, true);
 	}
 
-	const skillOverride = normalizeSkillOverride(params.skill);
+	// LAZY: dodge the jiti ESM/CJS interop TDZ race on the static `import { normalizeSkillOverride }` above (issue #28, RFC 17).
+	const { normalizeSkillOverride: normalizeSkill } = await import("../../runtime/skill-instructions.ts");
+	const skillOverride = normalizeSkill(params.skill);
 	const { manifest, tasks, paths } = createRunManifest({
 		cwd: resolvedCtx.cwd,
 		team,
@@ -387,23 +391,86 @@ todo
 		goal,
 		workspaceMode: params.workspaceMode,
 		ownerSessionId: ctx.sessionId,
-		taskId: taskId, // Pass taskId for agent naming (task-001_role)
-		specId: params.specId ?? (params as any).specId, // Pass specId for task-spec association
-		template: template, // Pass template for workflow type
+		runKind: params.runKind,
+		args: params.args,
 	});
-
-	// Substitute variables in workflow step tasks (e.g., {taskId}, {specId}, {taskPath})
-	substituteWorkflowVariables(workflow, manifest, goal);
-
 	const goalArtifact = writeArtifact(paths.artifactsRoot, {
 		kind: "prompt",
 		relativePath: "goal.md",
 		content: `${goal}\n`,
 		producer: "team-tool",
 	});
-	const updatedManifest = { ...manifest, ...(skillOverride !== undefined ? { skillOverride } : {}), artifacts: [goalArtifact], summary: "Run manifest created; worker execution is not implemented yet." };
+	const updatedManifest = { 
+		...manifest, 
+		taskId: params.taskId,
+		specId: params.specId,
+		template: params.template,
+		...(skillOverride !== undefined ? { skillOverride } : {}), 
+		artifacts: [goalArtifact], 
+		summary: "Run manifest created; worker execution is not implemented yet." 
+	};
 	atomicWriteJson(paths.manifestPath, updatedManifest);
 	registerActiveRun(updatedManifest);
+
+	// P2: dynamic-workflow dispatch — when the resolved workflow is a .dwf.ts (runtime:"dynamic"),
+	// run it via runDynamicWorkflow instead of the static executeTeamRun path. The script
+	// orchestrates subagents via ctx.agent(); only ctx.setResult() reaches the main context.
+	// Placed AFTER manifest creation so runId/paths/artifactsRoot are available.
+	if (!directAgent && (workflow as import("../../workflows/workflow-config.ts").DynamicWorkflowConfig).runtime === "dynamic") {
+		// LAZY: defer dynamic import of ../../runtime/dynamic-workflow-runner.ts to its call site.
+		const { runDynamicWorkflow } = await import("../../runtime/dynamic-workflow-runner.ts");
+		// Re-synthesize a dynamic-team (§0c C9) for role resolution.
+		const dwfTeam: import("../../teams/team-config.ts").TeamConfig = {
+			name: `dwf-${manifest.runId.slice(-12)}`,
+			description: `Dynamic workflow run for ${workflow.name}`,
+			source: "dynamic",
+			filePath: "<dynamic-workflow>",
+			roles: [{ name: "worker", agent: params.agent ?? "executor" }],
+			workspaceMode: "single",
+		};
+		const dwfManifest: import("../../state/types.ts").TeamRunManifest = {
+			...updatedManifest,
+			runKind: "dynamic-workflow",
+			team: dwfTeam.name,
+		};
+		atomicWriteJson(paths.manifestPath, dwfManifest);
+		try {
+			let dwfResult: import("../../runtime/dynamic-workflow-runner.ts").RunDynamicWorkflowResult | undefined;
+			try {
+				dwfResult = await runDynamicWorkflow({
+					manifest: dwfManifest,
+					workflow: workflow as import("../../workflows/workflow-config.ts").DynamicWorkflowConfig,
+					team: dwfTeam,
+					signal: ctx.signal ?? AbortSignal.timeout(3_600_000),
+					modelOverride: params.model,
+					tokenBudget: params.tokenBudget ?? (workflow as import("../../workflows/workflow-config.ts").DynamicWorkflowConfig).maxTokenBudget,
+				});
+			} catch (runnerError) {
+				// Round-11 runtime fix: persist manifest with status=failed when runner throws
+				// (e.g., script timeout, script syntax error, async failure). Previously the
+				// manifest stayed at 'queued' indefinitely, leaving an orphan state file.
+				const failureReason = runnerError instanceof Error ? runnerError.message : String(runnerError);
+				const failedManifest = { ...dwfManifest, status: "failed" as const, summary: `Dynamic workflow '${workflow.name}' failed: ${failureReason}`.slice(0, 2000), updatedAt: new Date().toISOString() };
+				atomicWriteJson(paths.manifestPath, failedManifest);
+				return result(
+					`Dynamic workflow '${workflow.name}' failed: ${failureReason}`,
+					{ action: "run", status: "error", runId: failedManifest.runId, artifactsRoot: failedManifest.artifactsRoot },
+					true,
+				);
+			}
+			// Round-10 runtime-test fix: persist the updated manifest with status=completed
+			// so status queries / cancel / cleanup see the real state. Previously run.ts
+			// returned the result without atomicWriteJson, leaving manifest at 'queued' forever.
+			atomicWriteJson(paths.manifestPath, dwfResult.manifest);
+			return result(
+				`Dynamic workflow '${workflow.name}' completed.\n${dwfResult.manifest.summary ?? ""}`,
+				{ action: "run", status: dwfResult.manifest.status === "failed" ? "error" : "ok", runId: dwfResult.manifest.runId, artifactsRoot: dwfResult.manifest.artifactsRoot },
+				dwfResult.manifest.status === "failed",
+			);
+		} finally {
+			unregisterActiveRun(dwfManifest.runId);
+		}
+	}
 
 	const loadedConfig = loadConfig(resolvedCtx.cwd);
 	// DX (Round 16 F4): surface config errors/warnings instead of silently
@@ -469,10 +536,6 @@ todo
 				`pi-crew run ${completed.manifest.status}: ${completed.manifest.runId} (${team.name})`,
 				`Goal: ${goal.slice(0, 100)}`,
 			];
-			// Show taskId for user awareness
-			if (taskId) {
-				lines.push(`Task: ${taskId}`);
-			}
 			if (metrics) {
 				lines.push("");
 				lines.push(`Metrics: ${metrics.completedCount}/${metrics.taskCount} tasks, ${metrics.totalTokens} tokens, ${metrics.durationMs}ms, consistency=${metrics.consistencyScore}`);
@@ -500,9 +563,11 @@ todo
 					let resultExcerpt = "";
 					if (task.resultArtifact?.path) {
 						try {
-							const resPath = path.isAbsolute(task.resultArtifact.path)
-							? task.resultArtifact.path
-							: path.join(completed.manifest.artifactsRoot, task.resultArtifact.path);
+							// H-3 fix (code-review 2026-06-23): resolve the result artifact path
+							// inside artifactsRoot via the project's safe-path primitive. Rejects
+							// absolute paths (/etc/passwd) and ../ traversal that the old
+							// path.isAbsolute shortcut + bare path.join allowed.
+							const resPath = resolveRealContainedPath(completed.manifest.artifactsRoot, task.resultArtifact.path);
 							resultExcerpt = fs.readFileSync(resPath, "utf-8").trim().slice(0, 2000);
 						} catch {
 							resultExcerpt = "(result unavailable)";
@@ -633,9 +698,11 @@ todo
 					let resultExcerpt = "";
 					if (task.resultArtifact?.path) {
 						try {
-							const resPath = path.isAbsolute(task.resultArtifact.path)
-							? task.resultArtifact.path
-							: path.join(completed.manifest.artifactsRoot, task.resultArtifact.path);
+							// H-3 fix (code-review 2026-06-23): resolve the result artifact path
+							// inside artifactsRoot via the project's safe-path primitive. Rejects
+							// absolute paths (/etc/passwd) and ../ traversal that the old
+							// path.isAbsolute shortcut + bare path.join allowed.
+							const resPath = resolveRealContainedPath(completed.manifest.artifactsRoot, task.resultArtifact.path);
 							resultExcerpt = fs.readFileSync(resPath, "utf-8").trim().slice(0, 2000);
 						} catch {
 							resultExcerpt = "(result unavailable)";
