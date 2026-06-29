@@ -4,7 +4,7 @@ description: Parallel research team for multi-project/source audits
 workspaceMode: single
 defaultWorkflow: parallel-research
 maxConcurrency: 4
-triggers: đọc sâu, deep read, deep research, source audit, multiple projects, parallel research, pi-*
+triggers: deep reading, deep read, deep research, source audit, multiple projects, parallel research, pi-*
 category: research
 cost: cheap
 ---
