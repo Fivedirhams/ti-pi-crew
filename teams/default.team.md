@@ -1,12 +1,12 @@
 ---
 name: default
-description: Balanced team for ordinary implementation tasks
+description: Обычная реализация - планирование, выполнение, проверка
 defaultWorkflow: default
 workspaceMode: single
 maxConcurrency: 2
 ---
 
-- explorer: agent=explorer fast discovery
-- planner: agent=planner plan the work
-- executor: agent=executor implement changes
-- verifier: agent=verifier verify completion
+- explorer: agent=explorer быстрое исследование
+- planner: agent=planner создать план
+- executor: agent=coder реализовать
+- verifier: agent=verifier проверить

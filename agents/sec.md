@@ -1,5 +1,5 @@
 ---
-name: security-reviewer
+name: sec
 description: Проверка безопасности и доверия
 model: false
 systemPromptMode: replace

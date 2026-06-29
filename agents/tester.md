@@ -1,5 +1,5 @@
 ---
-name: test-engineer
+name: tester
 description: Написание тестов. Работает в git branch.
 model: false
 systemPromptMode: replace

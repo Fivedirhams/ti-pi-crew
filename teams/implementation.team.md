@@ -1,18 +1,18 @@
 ---
 name: implementation
-description: Full implementation team with parallel specialists, critique, execution, review, and verification
+description: Полная реализация с параллельными специалистами, критикой и верификацией
 defaultWorkflow: implementation
 workspaceMode: single
 maxConcurrency: 3
 ---
 
-- explorer: agent=explorer map the codebase
-- analyst: agent=analyst clarify requirements and constraints
-- planner: agent=planner create execution plan
-- critic: agent=critic challenge and synthesize specialist findings
-- executor: agent=executor implement the plan
-- reviewer: agent=reviewer review the implementation
-- security-reviewer: agent=security-reviewer review security and trust boundaries
-- test-engineer: agent=test-engineer design and run verification
-- verifier: agent=verifier verify done
-- writer: agent=writer summarize documentation or release notes when needed
+- explorer: agent=explorer исследовать код
+- analyst: agent=analyst уточнить требования
+- planner: agent=planner создать план
+- critic: agent=critic критический анализ
+- executor: agent=coder реализовать план
+- reviewer: agent=reviewer ревью кода
+- sec: agent=sec безопасность
+- tester: agent=tester тесты
+- verifier: agent=verifier верификация
+- writer: agent=writer документация

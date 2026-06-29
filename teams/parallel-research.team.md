@@ -1,14 +1,11 @@
 ---
 name: parallel-research
-description: Parallel research team for multi-project/source audits
-workspaceMode: single
+description: Параллельное исследование с шардами
 defaultWorkflow: parallel-research
-maxConcurrency: 4
-triggers: deep reading, deep read, deep research, source audit, multiple projects, parallel research, pi-*
-category: research
-cost: cheap
+workspaceMode: single
+maxConcurrency: 3
 ---
 
-- explorer: agent=explorer gather source facts in parallel shards
-- analyst: agent=analyst synthesize shard findings
-- writer: agent=writer produce final notes
+- explorer: agent=explorer исследование
+- analyst: agent=analyst анализ
+- writer: agent=writer документация
