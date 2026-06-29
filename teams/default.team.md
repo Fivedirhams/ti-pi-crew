@@ -8,5 +8,5 @@ maxConcurrency: 2
 
 - explorer: agent=explorer быстрое исследование
 - planner: agent=planner создать план
-- executor: agent=coder реализовать
+- coder: agent=coder реализовать
 - verifier: agent=verifier проверить

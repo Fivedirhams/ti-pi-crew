@@ -6,6 +6,6 @@ workspaceMode: single
 maxConcurrency: 1
 ---
 
-- explorer: agent=explorer найти проблему
-- coder: agent=coder исправить
+- explorer: agent=explorer исследовать проблему
+- coder: agent=coder исправить баг
 - verifier: agent=verifier проверить

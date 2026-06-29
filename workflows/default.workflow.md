@@ -16,7 +16,7 @@ output: plan.md
 Create a concise implementation plan for: {goal}
 
 ## execute
-role: executor
+role: coder
 dependsOn: plan
 
 Implement the plan for: {goal}

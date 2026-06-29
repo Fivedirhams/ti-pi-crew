@@ -9,7 +9,7 @@ role: explorer
 Find the likely source of the issue: {goal}
 
 ## execute
-role: executor
+role: coder
 dependsOn: explore
 
 Make the smallest safe fix.

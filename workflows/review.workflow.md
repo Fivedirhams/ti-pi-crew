@@ -16,7 +16,7 @@ parallelGroup: review
 Review correctness, maintainability, tests, and regressions.
 
 ## security-review
-role: security-reviewer
+role: sec
 dependsOn: explore
 parallelGroup: review
 

@@ -7,5 +7,5 @@ maxConcurrency: 2
 ---
 
 - reviewer: agent=reviewer ревью кода
-- security-reviewer: agent=sec безопасность
+- sec: agent=sec безопасность
 - verifier: agent=verifier верификация
