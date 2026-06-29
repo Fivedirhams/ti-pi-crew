@@ -16,6 +16,7 @@ import { errors } from "../errors.ts";
 import { writeArtifact } from "../state/artifact-store.ts";
 import { appendEventAsync, appendEventFireAndForget } from "../state/event-log.ts";
 import { saveRunManifest } from "../state/state-store.ts";
+import { updateTaskStatus } from "../extension/team-tool/run.ts";
 import { createTaskClaim } from "../state/task-claims.ts";
 import {
 	createWorkerHeartbeat,
@@ -516,6 +517,8 @@ export async function runTeamTask(
 				};
 				tasks = updateTask(tasks, task);
 				crewHooks.emit({ type: "task_started", timestamp: new Date().toISOString(), runId: manifest.runId, taskId: task.id, data: { role: task.role, model: model ?? "default" } });
+				// Update task status in piOps to in_progress
+				updateTaskStatus(manifest.taskId || task.id, "in_progress", task.step?.id || task.role).catch(() => {});
 				upsertCrewAgent(
 					manifest,
 					recordFromTask(manifest, task, "child-process"),
@@ -1232,13 +1235,19 @@ export async function runTeamTask(
 		tasks = updateTask(tasks, task);
 
 		// Emit task completion hooks (100% reliable, fire-and-forget)
-		const hookType = task.status === "completed" ? "task_completed" : task.status === "failed" ? "task_failed" : "task_started";
+		const hookType = task.status === "completed" ? "task_completed" : task.status === "failed" ? "task_failed" : task.status === "cancelled" ? "task_cancelled" : "task_started";
 		crewHooks.emit({
 			type: hookType,
 			timestamp: task.finishedAt ?? new Date().toISOString(),
 			runId: manifest.runId,
 			taskId: task.id,
 			data: { status: task.status, role: task.role, error: task.error, exitCode: task.exitCode, usage: task.usage },
+		});
+		
+		// Update task status in piOps index (fire-and-forget, best-effort)
+		const stageName = task.step?.id || task.role;
+		updateTaskStatus(manifest.taskId || task.id, task.status, stageName).catch((e) => {
+			// best-effort - don't fail the task for piOps update errors
 		});
 
 		const packetArtifact = writeArtifact(manifest.artifactsRoot, {
