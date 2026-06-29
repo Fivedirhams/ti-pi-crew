@@ -62,8 +62,6 @@ import { checkProcessLiveness, isActiveRunStatus } from "../../runtime/process-s
 import { waitForRun } from "../../runtime/run-tracker.ts";
 import { hasAsyncStartMarker } from "../../runtime/async-marker.ts";
 import { collectRunMetrics } from "../../state/run-metrics.ts";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { PiTeamsToolResult } from "../tool-result.ts";
 import { buildParentContext, result, type TeamContext } from "./context.ts";
 import { effectiveRunConfig } from "./config-patch.ts";
