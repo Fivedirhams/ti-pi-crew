@@ -16,7 +16,7 @@ import { errors } from "../errors.ts";
 import { writeArtifact } from "../state/artifact-store.ts";
 import { appendEventAsync, appendEventFireAndForget } from "../state/event-log.ts";
 import { saveRunManifest } from "../state/state-store.ts";
-import { updateTaskStatus } from "../extension/team-tool/run.ts";
+import { updateTaskStatus } from "../extension/team-tool/task-status.ts";
 import { createTaskClaim } from "../state/task-claims.ts";
 import {
 	createWorkerHeartbeat,
