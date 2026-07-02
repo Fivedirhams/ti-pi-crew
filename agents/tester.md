@@ -5,7 +5,7 @@ model: false
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, write, bash, edit
+tools: read, grep, find, ls, bash, edit, write, code_find_symbol, code_get_callers
 ---
 
 # Tester Agent

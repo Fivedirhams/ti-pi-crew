@@ -402,8 +402,8 @@ todo
 	});
 	const updatedManifest = { 
 		...manifest, 
-		taskId: params.taskId,
-		specId: params.specId,
+		taskId: taskId ?? params.taskId,  // Use generated taskId if available
+		specId: finalSpecId ?? params.specId,
 		template: params.template,
 		...(skillOverride !== undefined ? { skillOverride } : {}), 
 		artifacts: [goalArtifact], 

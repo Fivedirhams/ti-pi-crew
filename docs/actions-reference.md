@@ -77,15 +77,31 @@ Response gồm:
 }
 ```
 
-#### Chọn team
+#### Chọn team và workflow
 
-| Team | Mục đích |
-|------|----------|
-| `default` | Cân bằng, 4 bước: explore → plan → execute → verify |
-| `fast-fix` | Sửa bug nhỏ: explore → execute → verify |
-| `implementation` | Adaptive planner tự quyết fanout |
-| `review` | Code review + security review |
-| `research` | Nghiên cứu và viết tài liệu |
+**Team** — ai выполняет работу (набор ролей и агентов)
+**Workflow** — что делать (последовательность шагов)
+
+```json
+{
+  "action": "run",
+  "team": "implementation",    // REQUIRED
+  "workflow": "implementation", // OPTIONAL: dùng defaultWorkflow của team
+  "goal": "Task description"
+}
+```
+
+| Team | defaultWorkflow | Mục đích |
+|------|----------------|----------|
+| `default` | default | Cân bằng, 4 bước: explore → plan → execute → verify |
+| `fast-fix` | fast-fix | Sửa bug nhỏ: explore → execute → verify |
+| `implementation` | implementation | Adaptive planner tự quyết fanout |
+| `review` | review | Code review + security review |
+| `research` | research | Nghiên cứu và viết tài liệu |
+| `planning` | planning | Chỉ lập kế hoạch, không execute |
+| `specify` | specify | Tạo/duyệt specification |
+
+**Validation:** System kiểm tra workflow-team compatibility trước khi chạy. Nếu workflow dùng role không có trong team → lỗi.
 
 #### Chạy bất đồng bộ (async)
 

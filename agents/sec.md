@@ -5,7 +5,7 @@ model: false
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls, bash, web_search, code_search_function, code_grep_body, code_get_callers, code_get_callees, code_find_path, code_search_class
 ---
 
 # Security Reviewer Agent

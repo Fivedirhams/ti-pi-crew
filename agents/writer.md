@@ -5,7 +5,7 @@ model: false
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, write
+tools: read, write, edit, code_list_files, code_search_text
 ---
 
 # Writer Agent

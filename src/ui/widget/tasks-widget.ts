@@ -68,7 +68,7 @@ export interface TasksWidgetState {
 	activeTab: "status" | "actions";
 }
 
-const DEFAULT_STATE: TasksWidgetState = {
+export const DEFAULT_TASKS_WIDGET_STATE: TasksWidgetState = {
 	selectedSpec: null,
 	selectedTask: null,
 	selectedTemplate: "implementation",
@@ -82,7 +82,7 @@ const DEFAULT_STATE: TasksWidgetState = {
 const WIDGET_KEY = "pi-crew-tasks";
 const STATUS_KEY = "pi-crew-tasks-status";
 
-const TEMPLATES = [
+export const TEMPLATES = [
 	"implementation",
 	"research",
 	"planning",
@@ -94,7 +94,7 @@ const TEMPLATES = [
 
 // ── Read piOps ─────────────────────────────────────────────────────────
 
-function readPiOpsIndex(): PiOpsIndex {
+export function readPiOpsIndex(): PiOpsIndex {
 	const indexPath = path.join(os.homedir(), ".pi", "agent", "piops", "index.json");
 	try {
 		if (fs.existsSync(indexPath)) {
@@ -106,7 +106,7 @@ function readPiOpsIndex(): PiOpsIndex {
 	return { version: "1.0", spec_counter: 0, task_counter: 0, specs: {}, tasks: {} };
 }
 
-function readRuns(): RunEntry[] {
+export function readRuns(): RunEntry[] {
 	const runsPath = path.join(os.homedir(), ".pi", "agent", "piops", "runs.json");
 	try {
 		if (fs.existsSync(runsPath)) {

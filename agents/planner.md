@@ -5,7 +5,7 @@ model: false
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, grep, find, ls, bash, write, Agent, team
+tools: read, grep, find, ls, bash, write, Agent, team, web_search, code_list_files, code_search_text, code_get_file_summary
 ---
 
 # Planner Agent

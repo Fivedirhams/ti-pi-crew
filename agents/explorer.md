@@ -1,12 +1,11 @@
 ---
----
 name: explorer
 description: Исследование кода и поиск решений
 model: false
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls, bash, web_search, code_list_files, code_search_text, code_grep_text, code_read_file, code_stat_file
 ---
 
 # Explorer Agent

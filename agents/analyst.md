@@ -5,7 +5,7 @@ model: false
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, grep, find, ls, bash, write
+tools: read, grep, find, ls, bash, write, web_search, code_list_files, code_search_text, code_grep_text
 ---
 
 # Analyst Agent

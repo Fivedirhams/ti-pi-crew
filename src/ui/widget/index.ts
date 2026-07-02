@@ -33,8 +33,10 @@ export {
 	updateTasksWidget, 
 	stopTasksWidget, 
 	buildTasksWidgetLines,
-	DEFAULT_STATE as DEFAULT_TASKS_WIDGET_STATE,
-	TEMPLATES
+	DEFAULT_TASKS_WIDGET_STATE,
+	TEMPLATES,
+	readPiOpsIndex,
+	readRuns
 } from "./tasks-widget.ts";
 export type { TasksWidgetState, PiOpsIndex, SpecEntry, TaskEntry, RunEntry } from "./tasks-widget.ts";
 

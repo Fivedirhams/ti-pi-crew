@@ -156,6 +156,78 @@ When unsure which team/workflow fits:
 | `research` | explore → analyze → write | Research and documentation |
 | `parallel-research` | Parallel shards → synthesize → write | Multi-source research |
 
+## How to Invoke
+
+### Format
+
+```json
+{
+  "action": "run",
+  "team": "implementation",    // REQUIRED: team name
+  "workflow": "implementation", // OPTIONAL: override default workflow
+  "goal": "Your task description"
+}
+```
+
+### Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `team` | Yes | Team name (default, implementation, fast-fix, review, research, etc.) |
+| `workflow` | No | Workflow name. If omitted → uses team's `defaultWorkflow` |
+| `role` | No | Run single role from team (e.g., `"coder"` runs only coder) |
+| `agent` | No | Run single agent directly (bypasses team, creates dynamic team) |
+| `goal` | Yes (or `task`) | Task description |
+| `async` | No | Run in background (`true`/`false`) |
+| `workspaceMode` | No | `"single"` or `"worktree"` |
+| `specId` | No | Bind to specification ID |
+| `taskId` | No | Bind to existing task ID |
+| `model` | No | Override model (e.g., `"gpt-4o-mini"`) |
+| `config` | No | Runtime config (limits, requirePlanApproval, etc.) |
+
+### Validation
+
+**System validates workflow-team compatibility** before execution:
+- All roles in workflow must exist in team
+- If mismatch → error: `"Workflow X is not valid for team Y: Step Z references unknown role"`
+
+### Examples
+
+**Minimal (uses team defaults):**
+```json
+{ "action": "run", "team": "default", "goal": "Fix bug" }
+```
+
+**With workflow override:**
+```json
+{ "action": "run", "team": "default", "workflow": "fast-fix", "goal": "Quick fix" }
+```
+
+**Single role:**
+```json
+{ "action": "run", "team": "implementation", "role": "coder", "goal": "Implement X" }
+```
+
+**Direct agent (no team):**
+```json
+{ "action": "run", "agent": "coder", "goal": "Task for coder" }
+```
+
+**Async:**
+```json
+{ "action": "run", "team": "implementation", "goal": "Long task", "async": true }
+```
+
+**With plan approval:**
+```json
+{
+  "action": "run",
+  "team": "implementation",
+  "goal": "Major refactor",
+  "config": { "runtime": { "requirePlanApproval": true } }
+}
+```
+
 ## Builtin Agents
 
 ```
