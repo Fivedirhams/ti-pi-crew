@@ -424,8 +424,8 @@ todo
 		...manifest, 
 		taskId: taskId ?? params.taskId,  // Use generated taskId if available
 		specId: finalSpecId ?? params.specId,
-		team: team,
-		workflow: workflow,
+		team: team.name,
+		workflow: workflow.name,
 		...(skillOverride !== undefined ? { skillOverride } : {}), 
 		artifacts: [goalArtifact], 
 		summary: "Run manifest created; worker execution is not implemented yet." 
