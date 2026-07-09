@@ -1,3 +1,4 @@
+// DEBUG MARKER
 import { allAgents, discoverAgents } from "../../agents/discover-agents.ts";
 import { allTeams, discoverTeams } from "../../teams/discover-teams.ts";
 import { allWorkflows, discoverWorkflows } from "../../workflows/discover-workflows.ts";
@@ -157,11 +158,12 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	if (!indexData.spec_counter) indexData.spec_counter = 0;
 	if (!indexData.task_counter) indexData.task_counter = 0;
 	
+	let finalSpecId = specId;  // Default: use provided specId
+	
 	if (!taskId) {
 		try {
 		// AUTO-GENERATE: Only if not provided
 		// Create spec if specId provided but doesn't exist
-			let finalSpecId = specId;
 			if (specId && !indexData.specs[specId]) {
 				indexData.spec_counter = (indexData.spec_counter || 0) + 1;
 				finalSpecId = `spec-${String(indexData.spec_counter).padStart(3, '0')}`;
@@ -254,7 +256,6 @@ todo
 	const { ensureCrewDirectory } = await loadCrewInit();
 	
 	await ensureCrewDirectory(workingDir);
-	
 	
 	// WORKTREE FIX: If worktree mode is needed but cwd is not a git repo, but cwd is not a git repo,
 	// auto-correct to the nearest git repo root. This prevents "not a git repository"
