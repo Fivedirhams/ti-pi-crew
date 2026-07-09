@@ -31,6 +31,7 @@ export interface SpecEntry {
 	version: number;
 	status: "active" | "completed" | "archived";
 	tasks: string[];
+	doc_path?: string;   // путь к spec-{id}.md
 	created_at: string;
 	updated_at: string;
 }
@@ -38,11 +39,13 @@ export interface SpecEntry {
 export interface TaskEntry {
 	id: string;
 	spec_id: string | null;
-	template: string;
+	team: string;          // required - какая команда выполняет
+	workflow?: string;     // опционально - какой workflow (по умолчанию defaultWorkflow тима)
 	title: string;
 	version: number;
 	status: "todo" | "in_progress" | "completed" | "failed";
 	stage: string | null;
+	doc_path?: string;     // путь к task-{id}.md с ТЗ
 	created_at: string;
 	updated_at: string;
 }
@@ -155,8 +158,48 @@ export class TasksWidgetComponent implements Component {
 
 		// ── Tab: Active Tasks Status ─────────────────────────────────────
 		if (this.state.activeTab === "status") {
-			lines.push(fg("accent", "📊 ACTIVE TASKS") + fg("dim", " · press Tab for actions"));
+			lines.push(fg("accent", "📊 ACTIVE RUNS") + fg("dim", " · press Tab for actions"));
 			
+			// Показываем активные runs из .crew/state/runs/
+			const runsDir = path.join(os.homedir(), ".crew", "state", "runs");
+			let activeRuns: Array<{id: string, goal: string, team: string, workflow: string, status: string, updatedAt: string}> = [];
+			
+			try {
+				if (fs.existsSync(runsDir)) {
+					const runDirs = fs.readdirSync(runsDir).filter(d => d.startsWith("team_"));
+					for (const runDir of runDirs.slice(-5)) {  // Последние 5 runs
+						const manifestPath = path.join(runsDir, runDir, "manifest.json");
+						if (fs.existsSync(manifestPath)) {
+							const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+							if (manifest.status === "running" || manifest.status === "queued") {
+								activeRuns.push({
+									id: runDir,
+									goal: manifest.goal?.slice(0, 40) || "(no goal)",
+									team: manifest.team || "default",
+									workflow: manifest.workflow || "default", 
+									status: manifest.status,
+									updatedAt: manifest.updatedAt || manifest.createdAt || ""
+								});
+							}
+						}
+					}
+				}
+			} catch { /* ignore */ }
+			
+			if (activeRuns.length === 0) {
+				lines.push(fg("muted", "  No active runs"));
+			} else {
+				for (const run of activeRuns) {
+					const statusIcon = run.status === "running" ? fg("accent", "●") : fg("muted", "○");
+					const statusText = run.status === "running" ? fg("success", "running") : fg("dim", run.status);
+					lines.push(`  ${statusIcon} ${fg("default", run.id.slice(-12))} ${fg("muted", run.team + "/" + run.workflow)}`);
+					lines.push(`    ${fg("dim", run.goal.slice(0, 50))}`);
+					lines.push(`    ${statusText} ${fg("dim", "· " + run.updatedAt.slice(11, 19))}`);
+				}
+			}
+			
+			// Также показываем piOps tasks
+			lines.push(fg("dim", "  ── TASKS ──"));
 			const tasks = Object.values(this.index.tasks);
 			const activeTasks = tasks.filter(t => t.status === "in_progress");
 			
