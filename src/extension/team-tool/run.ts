@@ -126,14 +126,19 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	if (!goal) return result("Run requires goal or task.", { action: "run", status: "error" }, true);
 
 	// AUTO-GENERATE TASK-ID: If no taskId provided, generate one
-	// Also handle spec_id and template for task-spec association
+	// Also handle spec_id, team and workflow for task-spec association
 	const osModule = await import("node:os");
 	const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
-	const docsDir = path.join(osModule.homedir(), '.pi', 'agent', 'docs', 'tasks');
+	// Docs path: используем /project/docs если доступен, иначе fallback
+	const docsRoot = fs.existsSync('/project') ? '/project/docs' : path.join(osModule.homedir(), '.pi', 'agent', 'docs');
+	const docsTasksDir = path.join(docsRoot, 'tasks');
+	const docsSpecsDir = path.join(docsRoot, 'specs');
 	
 	let taskId = params.taskId;
 	const specId = params.specId;
-	const template = params.template ?? params.workflow ?? 'default';
+	// team и workflow для piOps: если не указаны - используем team='default', workflow=указанный или default
+	const piOpsTeam = params.team ?? 'default';
+	const piOpsWorkflow = params.workflow ?? 'default';
 	
 	// piOps: Load or create index
 	const indexPath = path.join(piOpsDir, 'index.json');
@@ -150,18 +155,21 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	if (!indexData.task_counter) indexData.task_counter = 0;
 	
 	if (!taskId) {
+		try {
 		// AUTO-GENERATE: Only if not provided
 		// Create spec if specId provided but doesn't exist
 			let finalSpecId = specId;
 			if (specId && !indexData.specs[specId]) {
 				indexData.spec_counter = (indexData.spec_counter || 0) + 1;
 				finalSpecId = `spec-${String(indexData.spec_counter).padStart(3, '0')}`;
+				const specDocPath = path.join(docsSpecsDir, `${finalSpecId}.md`);
 				indexData.specs[finalSpecId] = {
 					id: finalSpecId,
 					title: goal.slice(0, 100),
 					version: 1,
 					status: 'active',
 					tasks: [],
+					doc_path: specDocPath,
 					created_at: new Date().toISOString(),
 					updated_at: new Date().toISOString()
 				};
@@ -171,14 +179,19 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 			// Create task
 			indexData.task_counter = (indexData.task_counter || 0) + 1;
 			taskId = `task-${String(indexData.task_counter).padStart(3, '0')}`;
+			// Build doc_path for task document
+			const taskDocPath = path.join(docsTasksDir, `${taskId}.md`);
+			
 			indexData.tasks[taskId] = {
 				id: taskId,
 				spec_id: finalSpecId || null,
-				template: template,
+				team: piOpsTeam,
+				workflow: piOpsWorkflow,
 				title: goal.slice(0, 100),
 				version: 1,
 				status: "todo",
 				stage: null,
+				doc_path: taskDocPath,
 				created_at: new Date().toISOString(),
 				updated_at: new Date().toISOString()
 			};
@@ -191,11 +204,10 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 			}
 			
 			fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
-			console.log(`[piOps] Created task: ${taskId} (spec: ${finalSpecId || 'none'}, template: ${template})`);
+			console.log(`[piOps] Created task: ${taskId} (spec: ${finalSpecId || 'none'}, team: ${piOpsTeam}, workflow: ${piOpsWorkflow})`);
 			
 			// Create task document
-			fs.mkdirSync(docsDir, { recursive: true });
-			const taskDocPath = path.join(docsDir, `${taskId}.md`);
+			fs.mkdirSync(docsTasksDir, { recursive: true });
 			const taskDocContent = `# Task: ${goal.slice(0, 100)}
 
 ## ID
@@ -207,8 +219,11 @@ ${taskId}
 ## Spec
 ${finalSpecId || 'none'}
 
-## Template
-${template}
+## Team
+${piOpsTeam}
+
+## Workflow
+${piOpsWorkflow}
 
 ## Description
 ${goal}
@@ -404,7 +419,8 @@ todo
 		...manifest, 
 		taskId: taskId ?? params.taskId,  // Use generated taskId if available
 		specId: finalSpecId ?? params.specId,
-		template: params.template,
+		team: team,
+		workflow: workflow,
 		...(skillOverride !== undefined ? { skillOverride } : {}), 
 		artifacts: [goalArtifact], 
 		summary: "Run manifest created; worker execution is not implemented yet." 
