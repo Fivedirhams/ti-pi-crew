@@ -562,7 +562,10 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 					for (const [id, task] of Object.entries(index.tasks)) {
 						const statusIcon = task.status === 'in_progress' ? '🔄' : task.status === 'completed' ? '✅' : task.status === 'failed' ? '❌' : '⏳';
 						statusText += `${statusIcon} ${id}: ${task.title?.slice(0, 40) || '(no title)'} [${task.status}]\n`;
-						if (task.spec_id) statusText += `   📋 spec: ${task.spec_id}, template: ${task.template}\n`;
+						const team = task.team;
+						const workflow = task.workflow ?? 'default';
+						if (task.spec_id) statusText += `   📋 spec: ${task.spec_id}, team: ${team}, workflow: ${workflow}\n`;
+						else statusText += `   👥 team: ${team}, workflow: ${workflow}\n`;
 					}
 				}
 				ctx.ui.notify(statusText, "info");

@@ -231,8 +231,10 @@ export function createRunManifest(params: {
 	taskId?: string;
 	/** Spec ID for task-spec association (e.g., spec-001) */
 	specId?: string;
-	/** Template used for this run (e.g., implementation, research) */
-	template?: string;
+	/** Team used for this run (e.g., implementation, default) */
+	team?: string;
+	/** Workflow used for this run (e.g., implementation, research) */
+	workflow?: string;
 }): { manifest: TeamRunManifest; tasks: TeamTaskState[]; paths: RunPaths } {
 	const paths = createRunPaths(params.cwd);
 	const now = new Date().toISOString();
@@ -257,7 +259,8 @@ export function createRunManifest(params: {
 		...(params.ownerSessionId ? { ownerSessionId: params.ownerSessionId } : {}),
 		...(params.taskId ? { taskId: params.taskId } : {}),
 		...(params.specId ? { specId: params.specId } : {}),
-		...(params.template ? { template: params.template } : {}),
+		...(params.team ? { team: params.team } : {}),
+		...(params.workflow ? { workflow: params.workflow } : {}),
 	};
 	fs.mkdirSync(paths.stateRoot, { recursive: true });
 	fs.mkdirSync(paths.artifactsRoot, { recursive: true });
