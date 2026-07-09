@@ -48,6 +48,10 @@ import type { createRunSnapshotCache } from "../../ui/run-snapshot-cache.ts";
 import type { MetricRegistry } from "../../observability/metric-registry.ts";
 import { updateTasksWidget, stopTasksWidget, DEFAULT_TASKS_WIDGET_STATE, TEMPLATES, readPiOpsIndex, readRuns } from "../../ui/widget/tasks-widget.ts";
 
+// Tasks widget periodic refresh interval - module-level to persist across command calls
+let tasksWidgetInterval: ReturnType<typeof setInterval> | undefined;
+let tasksWidgetState = { ...DEFAULT_TASKS_WIDGET_STATE };
+
 export interface RegisterTeamCommandsDeps {
 	startForegroundRun: (ctx: ExtensionContext, runner: (signal?: AbortSignal) => Promise<void>, runId?: string) => void;
 	abortForegroundRun: (runId: string) => boolean;
@@ -502,8 +506,6 @@ export function registerTeamCommands(pi: ExtensionAPI, deps: RegisterTeamCommand
 	} });
 
 	// Tasks widget command - показывает активные tasks и quick actions
-	let tasksWidgetState = { ...DEFAULT_TASKS_WIDGET_STATE };
-	let tasksWidgetInterval: ReturnType<typeof setInterval> | undefined;
 
 	pi.registerCommand("tasks", {
 		description: "Open tasks panel: active tasks status and quick actions",
