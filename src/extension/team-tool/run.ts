@@ -113,6 +113,9 @@ function scheduleBackgroundEarlyExitGuard(cwd: string, runId: string, pid: numbe
 }
 
 export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): Promise<PiTeamsToolResult> {
+	
+	
+	
 	// CHAIN DISPATCH: runs before goal validation since a chain has no top-level
 	// goal. The injected handleRun reference breaks the run.ts ↔ chain-dispatch.ts
 	// import cycle; the lazy import defers the chain-executor cost until a chain is
@@ -238,20 +241,22 @@ todo
 		}
 	}
 	
+	
+	
 	// Pass taskId to params for downstream use
 	(params as any).taskId = taskId;
 	
 	const intentPrefix = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal;
 
 	// P0: Ensure .crew directory structure exists before creating any manifests.
-	// Latched dynamic import (loadCrewInit) — concurrent `team` tool calls from
-	// N subagents share ONE in-flight promise so crew-init.ts's module body
-	// evaluates exactly once (avoids the cold-start race on CREW_README / path / fs).
 	const workingDir = ctx.cwd ?? process.cwd();
+	
 	const { ensureCrewDirectory } = await loadCrewInit();
+	
 	await ensureCrewDirectory(workingDir);
-
-	// WORKTREE FIX: If worktree mode is needed but cwd is not a git repo,
+	
+	
+	// WORKTREE FIX: If worktree mode is needed but cwd is not a git repo, but cwd is not a git repo,
 	// auto-correct to the nearest git repo root. This prevents "not a git repository"
 	// errors when ctx.cwd points to a parent directory that isn't a git repo.
 	let resolvedCtx = ctx;
@@ -508,7 +513,10 @@ todo
 		logInternalError("team-tool.run.configWarning", new Error(`config issues: ${configIssues.join("; ")}`), `runId=${updatedManifest.runId} path=${loadedConfig.path ?? "(defaults)"}`);
 	}
 	const executedConfig = effectiveRunConfig(loadedConfig.config, params.config);
+	
 	const runtime = await resolveCrewRuntime(executedConfig);
+	
+	
 	const runtimeResolution = runtimeResolutionState(runtime);
 	const executionManifest = { ...updatedManifest, runtimeResolution, runConfig: executedConfig, updatedAt: new Date().toISOString() };
 	atomicWriteJson(paths.manifestPath, executionManifest);
@@ -669,6 +677,8 @@ todo
 		].join("\n"), { action: "run", status: "error", runId: blocked.runId, artifactsRoot: blocked.artifactsRoot }, true);
 	}
 	const executeWorkers = runtime.kind !== "scaffold";
+	
+	
 	if (executeWorkers && ctx.startForegroundRun) {
 		ctx.onRunStarted?.(updatedManifest.runId);
 		ctx.startForegroundRun(async (signal) => {
