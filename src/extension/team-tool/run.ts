@@ -133,14 +133,14 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	// Also handle spec_id, team and workflow for task-spec association
 	const osModule = await import("node:os");
 	const piOpsDir = path.join(osModule.homedir(), '.pi', 'agent', 'piops');
-	// Docs path: используем /project/docs если доступен, иначе fallback
+	// Docs path: use /project/docs if available, otherwise fallback
 	const docsRoot = fs.existsSync('/project') ? '/project/docs' : path.join(osModule.homedir(), '.pi', 'agent', 'docs');
 	const docsTasksDir = path.join(docsRoot, 'tasks');
 	const docsSpecsDir = path.join(docsRoot, 'specs');
 	
 	let taskId = params.taskId;
 	const specId = params.specId;
-	// team и workflow для piOps: если не указаны - используем team='default', workflow=указанный или default
+	// team and workflow for piOps: default to 'default' if not specified
 	const piOpsTeam = params.team ?? 'default';
 	const piOpsWorkflow = params.workflow ?? 'default';
 	

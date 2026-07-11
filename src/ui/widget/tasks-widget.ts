@@ -1,9 +1,9 @@
 /**
- * Tasks Widget - интерактивный виджет для управления task/spec/agent
+ * Tasks Widget - interactive widget for task/spec/agent management
  * 
- * Показывает:
- * 1. Active Tasks - статус и прогресс
- * 2. Quick Actions - формирование запроса
+ * Shows:
+ * 1. Active Tasks - status and progress
+ * 2. Quick Actions - query builder
  */
 
 import * as fs from "node:fs";
@@ -31,7 +31,7 @@ export interface SpecEntry {
 	version: number;
 	status: "active" | "completed" | "archived";
 	tasks: string[];
-	doc_path?: string;   // путь к spec-{id}.md
+	doc_path?: string;   // path to spec-{id}.md
 	created_at: string;
 	updated_at: string;
 }
@@ -39,13 +39,13 @@ export interface SpecEntry {
 export interface TaskEntry {
 	id: string;
 	spec_id: string | null;
-	team: string;          // required - какая команда выполняет
-	workflow?: string;     // опционально - какой workflow (по умолчанию defaultWorkflow тима)
+	team: string;          // required - which team executes
+	workflow?: string;     // optional - which workflow (defaults to team's defaultWorkflow)
 	title: string;
 	version: number;
 	status: "todo" | "in_progress" | "completed" | "failed";
 	stage: string | null;
-	doc_path?: string;     // путь к task-{id}.md с ТЗ
+	doc_path?: string;     // path to task-{id}.md with spec
 	created_at: string;
 	updated_at: string;
 }
@@ -160,14 +160,14 @@ export class TasksWidgetComponent implements Component {
 		if (this.state.activeTab === "status") {
 			lines.push(fg("accent", "📊 ACTIVE RUNS") + fg("dim", " · press Tab for actions"));
 			
-			// Показываем активные runs из .crew/state/runs/
+			// Show active runs from .crew/state/runs/
 			const runsDir = path.join(os.homedir(), ".crew", "state", "runs");
 			let activeRuns: Array<{id: string, goal: string, team: string, workflow: string, status: string, updatedAt: string}> = [];
 			
 			try {
 				if (fs.existsSync(runsDir)) {
 					const runDirs = fs.readdirSync(runsDir).filter(d => d.startsWith("team_"));
-					for (const runDir of runDirs.slice(-5)) {  // Последние 5 runs
+					for (const runDir of runDirs.slice(-5)) {  // Last 5 runs
 						const manifestPath = path.join(runsDir, runDir, "manifest.json");
 						if (fs.existsSync(manifestPath)) {
 							const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
@@ -198,7 +198,7 @@ export class TasksWidgetComponent implements Component {
 				}
 			}
 			
-			// Также показываем piOps tasks
+			// Also show piOps tasks
 			lines.push(fg("dim", "  ── TASKS ──"));
 			const tasks = Object.values(this.index.tasks);
 			const activeTasks = tasks.filter(t => t.status === "in_progress");
