@@ -96,6 +96,173 @@ function tailFile(filePath: string, maxBytes = 4096): string | undefined {
 	}
 }
 
+// Template placeholders replacement
+function replacePlaceholders(content: string, vars: Record<string, string>): string {
+	let result = content;
+	for (const [key, value] of Object.entries(vars)) {
+		result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+	}
+	return result;
+}
+
+// Create spec document from template or fallback
+async function createSpecDocument(opts: {
+	specId: string;
+	taskId: string;
+	title: string;
+	goal: string;
+	status: string;
+	created_at: string;
+	updated_at: string;
+	docsSpecsDir: string;
+}): Promise<string | null> {
+	const { specId, taskId, title, goal, status, created_at, updated_at, docsSpecsDir } = opts;
+
+	const templatePath = path.join(docsSpecsDir, 'spec_template.md');
+	let content: string;
+
+	if (fs.existsSync(templatePath)) {
+		try {
+			const template = fs.readFileSync(templatePath, 'utf-8');
+			content = replacePlaceholders(template, {
+				specId,
+				taskId: taskId || 'pending',
+				title,
+				goal,
+				status,
+				created_at,
+				updated_at
+			});
+			console.log(`[piOps] Using spec template: ${templatePath}`);
+		} catch (e) {
+			console.log(`[piOps] Warning: could not read spec template: ${e}`);
+			content = null;
+		}
+	} else {
+		content = null;
+	}
+
+	// Fallback template if no template file
+	if (!content) {
+		content = `# Spec: ${title}
+
+## ID
+${specId}
+
+## Status
+${status}
+
+## Overview
+${goal}
+
+## Tasks
+- ${taskId || 'pending'}
+
+## Requirements
+<!-- TODO: Fill by analyst agent in specify workflow -->
+
+-
+
+## Scope
+<!-- TODO: Fill by analyst agent in specify workflow -->
+
+-
+
+## Acceptance Criteria
+<!-- TODO: Fill by analyst agent in specify workflow -->
+
+-
+
+## Created
+${created_at}
+
+## Updated
+${updated_at}
+`;
+		console.log(`[piOps] Using fallback spec template`);
+	}
+
+	return content;
+}
+
+// Create task document from template or fallback
+async function createTaskDocument(opts: {
+	taskId: string;
+	specId: string;
+	team: string;
+	workflow: string;
+	goal: string;
+	status: string;
+	created_at: string;
+	docsTasksDir: string;
+}): Promise<string | null> {
+	const { taskId, specId, team, workflow, goal, status, created_at, docsTasksDir } = opts;
+
+	const templatePath = path.join(docsTasksDir, 'task_template.md');
+	let content: string;
+
+	if (fs.existsSync(templatePath)) {
+		try {
+			const template = fs.readFileSync(templatePath, 'utf-8');
+			content = replacePlaceholders(template, {
+				taskId,
+				specId,
+				team,
+				workflow,
+				goal,
+				status,
+				created_at
+			});
+			console.log(`[piOps] Using task template: ${templatePath}`);
+		} catch (e) {
+			console.log(`[piOps] Warning: could not read task template: ${e}`);
+			content = null;
+		}
+	} else {
+		content = null;
+	}
+
+	// Fallback template if no template file
+	if (!content) {
+		content = `# Task: ${goal}
+
+## ID
+${taskId}
+
+## Spec
+${specId}
+
+## Team / Workflow
+${team} / ${workflow}
+
+## Description
+${goal}
+
+## Requirements
+<!-- TODO: Fill by agent -->
+
+-
+
+## Scope
+<!-- TODO: Fill by agent -->
+
+-
+
+## Status
+${status}
+
+## History
+- ${created_at}: Created by ${team} workflow
+
+## Notes
+<!-- Additional notes from agents -->
+`;
+		console.log(`[piOps] Using fallback task template`);
+	}
+
+	return content;
+}
+
 function scheduleBackgroundEarlyExitGuard(cwd: string, runId: string, pid: number | undefined, logPath: string): void {
 	if (process.env.PI_CREW_ASYNC_EARLY_EXIT_GUARD === "0") return;
 	const timer = setTimeout(() => {
@@ -139,7 +306,12 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	const docsSpecsDir = path.join(docsRoot, 'specs');
 	
 	let taskId = params.taskId;
-	const specId = params.specId;
+	let specId = params.specId;
+
+	// Normalize: "new" or undefined → generate new IDs
+	const taskIdIsNew = !taskId || taskId === 'new';
+	const specIdIsNew = !specId || specId === 'new';
+
 	// team and workflow for piOps: default to 'default' if not specified
 	const piOpsTeam = params.team ?? 'default';
 	const piOpsWorkflow = params.workflow ?? 'default';
@@ -158,13 +330,18 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 	if (!indexData.spec_counter) indexData.spec_counter = 0;
 	if (!indexData.task_counter) indexData.task_counter = 0;
 	
-	let finalSpecId = specId;  // Default: use provided specId
-	
-	if (!taskId) {
+	let finalSpecId = specIdIsNew ? undefined : specId;
+
+	if (taskIdIsNew) {
 		try {
-		// AUTO-GENERATE: Only if not provided
-		// Create spec if specId provided but doesn't exist
-			if (specId && !indexData.specs[specId]) {
+			// Step 1: Create task first to get taskId
+			indexData.task_counter = (indexData.task_counter || 0) + 1;
+			taskId = `task-${String(indexData.task_counter).padStart(3, '0')}`;
+			const taskDocPath = path.join(docsTasksDir, `${taskId}.md`);
+			const createdAt = new Date().toISOString();
+
+			// Step 2: Create or update spec
+			if (specIdIsNew || (specId && !indexData.specs[specId])) {
 				indexData.spec_counter = (indexData.spec_counter || 0) + 1;
 				finalSpecId = `spec-${String(indexData.spec_counter).padStart(3, '0')}`;
 				const specDocPath = path.join(docsSpecsDir, `${finalSpecId}.md`);
@@ -173,20 +350,40 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 					title: goal.slice(0, 100),
 					version: 1,
 					status: 'active',
-					tasks: [],
+					tasks: [taskId],
 					doc_path: specDocPath,
-					created_at: new Date().toISOString(),
-					updated_at: new Date().toISOString()
+					created_at: createdAt,
+					updated_at: createdAt
 				};
 				console.log(`[piOps] Created spec: ${finalSpecId}`);
+
+				// Create spec.md file from template or fallback
+				fs.mkdirSync(docsSpecsDir, { recursive: true });
+				const specContent = await createSpecDocument({
+					specId: finalSpecId,
+					taskId: taskId,
+					title: goal.slice(0, 100),
+					goal: goal,
+					status: 'active',
+					created_at: createdAt,
+					updated_at: createdAt,
+					docsSpecsDir
+				});
+				if (specContent) {
+					fs.writeFileSync(specDocPath, specContent);
+					console.log(`[piOps] Created spec document: ${specDocPath}`);
+				}
+			} else if (specId && indexData.specs[specId]) {
+				// Use existing spec, add task to it
+				finalSpecId = specId;
+				indexData.specs[finalSpecId].tasks = indexData.specs[finalSpecId].tasks || [];
+				if (!indexData.specs[finalSpecId].tasks.includes(taskId)) {
+					indexData.specs[finalSpecId].tasks.push(taskId);
+				}
+				indexData.specs[finalSpecId].updated_at = createdAt;
 			}
-			
-			// Create task
-			indexData.task_counter = (indexData.task_counter || 0) + 1;
-			taskId = `task-${String(indexData.task_counter).padStart(3, '0')}`;
-			// Build doc_path for task document
-			const taskDocPath = path.join(docsTasksDir, `${taskId}.md`);
-			
+
+			// Step 3: Save task to index
 			indexData.tasks[taskId] = {
 				id: taskId,
 				spec_id: finalSpecId || null,
@@ -197,47 +394,29 @@ export async function handleRun(params: TeamToolParamsValue, ctx: TeamContext): 
 				status: "todo",
 				stage: null,
 				doc_path: taskDocPath,
-				created_at: new Date().toISOString(),
-				updated_at: new Date().toISOString()
+				created_at: createdAt,
+				updated_at: createdAt
 			};
-			
-			// Add task to spec's task list
-			if (finalSpecId && indexData.specs[finalSpecId]) {
-				indexData.specs[finalSpecId].tasks = indexData.specs[finalSpecId].tasks || [];
-				indexData.specs[finalSpecId].tasks.push(taskId);
-				indexData.specs[finalSpecId].updated_at = new Date().toISOString();
-			}
-			
+
 			fs.writeFileSync(indexPath, JSON.stringify(indexData, null, 2));
 			console.log(`[piOps] Created task: ${taskId} (spec: ${finalSpecId || 'none'}, team: ${piOpsTeam}, workflow: ${piOpsWorkflow})`);
-			
-			// Create task document
+
+			// Step 4: Create task document from template or fallback
 			fs.mkdirSync(docsTasksDir, { recursive: true });
-			const taskDocContent = `# Task: ${goal.slice(0, 100)}
-
-## ID
-${taskId}
-
-## Version
-1.0
-
-## Spec
-${finalSpecId || 'none'}
-
-## Team
-${piOpsTeam}
-
-## Workflow
-${piOpsWorkflow}
-
-## Description
-${goal}
-
-## Status
-todo
-`;
-			fs.writeFileSync(taskDocPath, taskDocContent);
-			console.log(`[piOps] Created task document: ${taskDocPath}`);
+			const taskContent = await createTaskDocument({
+				taskId: taskId,
+				specId: finalSpecId || 'new',
+				team: piOpsTeam,
+				workflow: piOpsWorkflow,
+				goal: goal,
+				status: 'todo',
+				created_at: createdAt,
+				docsTasksDir
+			});
+			if (taskContent) {
+				fs.writeFileSync(taskDocPath, taskContent);
+				console.log(`[piOps] Created task document: ${taskDocPath}`);
+			}
 		} catch (e) {
 			console.log('[piOps] Warning: could not create task:', e);
 		}
