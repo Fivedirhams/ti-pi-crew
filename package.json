@@ -91,7 +91,6 @@
     "cli-highlight": "^2.1.11",
     "diff": "^5.2.0",
     "jiti": "^2.7.0",
-    "ti-pi-crew": "file:ti-pi-crew-0.9.14.0.tgz",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
