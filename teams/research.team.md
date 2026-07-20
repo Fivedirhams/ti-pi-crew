@@ -1,9 +1,9 @@
 ---
 name: research
-description: Исследование и анализ
+description: Исследование технологий и решений
 defaultWorkflow: research
 workspaceMode: single
 maxConcurrency: 1
 ---
 
-- explorer: agent=explorer исследовать
+- researcher: agent=researcher исследовать технологии и решения

@@ -17,12 +17,12 @@ tools: read, grep, find, ls, bash, edit, write, code_find_symbol, code_get_calle
 **Документы для реализации:**
 - `docs/policy.md` — стандарты кода, безопасность, структура проекта
 - `docs/specs/{component-id}.md` — спецификация текущего компонента
-- `docs/tasks/{task-id}.md` — задача с требованиями
+- `docs/tasks/{task-id}.md` — задача с Requirements и Scope (уже заполнены analyst)
 
 **Важно:** Реализация ведётся в контексте:
 - Требований из spec (Functional Requirements, Acceptance Criteria)
+- Требований из task (Requirements, Scope) — заполнены analyst
 - Стандартов из policy (Code Standards, Security)
-- Ограничений из task (Scope, Requirements)
 
 ## Workflow Stages
 
@@ -45,8 +45,8 @@ tools: read, grep, find, ls, bash, edit, write, code_find_symbol, code_get_calle
 
 ## Input/Output
 
-- Читай план из artifact предыдущего этапа (dependsOn)
-- Читай spec компонента для понимания требований
+- Читай Requirements и Scope из docs/tasks/{taskId}.md
+- Читай Functional Requirements и Acceptance Criteria из docs/specs/{specId}.md
 - Создавай output файл с изменениями
 - Используй taskId для именования веток
 
@@ -55,4 +55,7 @@ tools: read, grep, find, ls, bash, edit, write, code_find_symbol, code_get_calle
 - Работай в git branch
 - Создавай атомарные коммиты
 - Не мержи в main самостоятельно - передай verifier
-- Заполняй task document результатами в секции Results
+- Заполняй секцию Implementation Notes в файле docs/tasks/{taskId}.md:
+  - Как реализовано
+  - Какие файлы изменены
+  - Ключевые решения
