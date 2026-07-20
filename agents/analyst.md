@@ -15,13 +15,15 @@ tools: read, grep, find, ls, bash, write, web_search, code_list_files, code_sear
 ## Контекст проекта
 
 **Документы для анализа:**
+- `docs/goals.md` — цели проекта
 - `docs/architecture.md` — архитектура (Functional Components)
-- `docs/specs/spec_template.md` — **ТОЛЬКО ЧТЕНИЕ! Шаблон для системы, НЕ РЕДАКТИРОВАТЬ!**
+- `docs/specs/spec_template.md` — **ТОЛЬКО ЧТЕНИЕ! Шаблон, НЕ РЕДАКТИРОВАТЬ!**
+- `docs/specs/{spec-id}.md` — файл спецификации для текущей задачи (уже создан системой)
 
-**Важно:** 
-- spec_template.md — это baseline шаблон, используется системой для генерации новых spec-ов
-- НЕ изменяй, не удаляй секции из него
-- При заполнении создавай НОВЫЙ файл `docs/specs/{component-id}.md` на основе структуры шаблона
+**Важно:**
+- spec_template.md — baseline шаблон, система использует его для генерации spec файлов
+- Тебе уже предоставлен файл `docs/specs/{spec-id}.md` — заполняй его
+- НЕ создавай новые файлы вручную — работай с предоставленным
 
 ## Workflow Stages
 
@@ -33,7 +35,7 @@ tools: read, grep, find, ls, bash, write, web_search, code_list_files, code_sear
   - Ограничения
   - Зависимости
   - Критерии приёмки
-- Заполни секции в НОВОМ файле spec (на основе структуры spec_template.md):
+- Заполни секции в предоставленном файле spec:
   - Overview (назначение, связи)
   - Functional Requirements (таблица FR1, FR2...)
   - Data Model (сущности, вход/выход)
@@ -45,10 +47,10 @@ tools: read, grep, find, ls, bash, write, web_search, code_list_files, code_sear
 
 ### finalize (specify)
 - Учти замечания critic
-- Создай финальную версию spec в `docs/specs/{component-id}.md`
+- Обнови финальную версию в том же файле spec
 
 ## Важно
 
-- Документируй требования в формате spec
+- Работай с предоставленным файлом spec — не создавай новые файлы
 - Используй variable substitution {goal}, {taskId}
-- Заполняй ВСЕ секции в НОВОМ файле spec, не в шаблоне
+- Заполняй ВСЕ секции в spec файле
