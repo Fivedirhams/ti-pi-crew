@@ -144,40 +144,62 @@ async function createSpecDocument(opts: {
 
 	// Fallback template if no template file
 	if (!content) {
-		content = `# Spec: ${title}
+		content = `# Functional Spec: ${title}
 
-## ID
-${specId}
+> Спецификация функционального компонента. Описывает ЧТО делает и КАК работает.
 
-## Status
-${status}
+## Version
+
+**v1.0** — ${created_at}
 
 ## Overview
-${goal}
 
-## Tasks
-- ${taskId || 'pending'}
+**Назначение:** ${goal}
+**Связь с architecture:** ${specId}
+**Зависимости:** 
 
-## Requirements
-<!-- TODO: Fill by analyst agent in specify workflow -->
+## Functional Requirements
 
--
+| ID | Требование | Приоритет | Status |
+|----|------------|-----------|--------|
+| FR1 | | | |
 
-## Scope
-<!-- TODO: Fill by analyst agent in specify workflow -->
+## Data Model
 
--
+**Входящие данные:** 
+**Исходящие данные:** 
+**Сущности БД:** 
+
+## API / Интерфейс
+
+**Внутренний интерфейс:**
+\`\`\`
+// TODO: add function signature
+\`\`\`
+
+**Внешний интерфейс:** 
+
+## Logic / Algorithm
+
+
+
+## Error Handling
+
+- 
+
+## Testing Strategy
+
+- [ ] Unit tests для core logic
+- [ ] Integration tests с зависимостями
+- [ ] Mock стратегия: 
 
 ## Acceptance Criteria
-<!-- TODO: Fill by analyst agent in specify workflow -->
+
+- [ ] 
+
+## Notes
 
 -
-
-## Created
-${created_at}
-
-## Updated
-${updated_at}
 `;
 		console.log(`[piOps] Using fallback spec template`);
 	}
@@ -226,6 +248,11 @@ async function createTaskDocument(opts: {
 	if (!content) {
 		content = `# Task: ${goal}
 
+> Задача, созданная из specify workflow. Связана со spec: ${specId}
+> Выполняется командой ${team} с workflow: ${workflow}
+
+---
+
 ## ID
 ${taskId}
 
@@ -238,24 +265,36 @@ ${team} / ${workflow}
 ## Description
 ${goal}
 
+## Status
+${status}
+
 ## Requirements
-<!-- TODO: Fill by agent -->
+<!-- TODO: Заполни требования для выполнения этой задачи -->
 
 -
 
 ## Scope
-<!-- TODO: Fill by agent -->
+<!-- TODO: Заполни границы задачи (что входит, что НЕ входит) -->
 
 -
 
-## Status
-${status}
+## Implementation Notes
+<!-- Заполняется агентом в процессе работы -->
+
+- 
+
+## Results
+<!-- TODO: Заполни результаты после завершения -->
+
+-
+
+## Notes
+<!-- Дополнительные заметки от агентов -->
+
+-
 
 ## History
 - ${created_at}: Created by ${team} workflow
-
-## Notes
-<!-- Additional notes from agents -->
 `;
 		console.log(`[piOps] Using fallback task template`);
 	}
