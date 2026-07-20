@@ -12,23 +12,29 @@ tools: read, grep, find, ls, bash, write, Agent, team, web_search, code_list_fil
 
 Координация и декомпозиция задач.
 
+## Контекст проекта
+
+**Документы для планирования:**
+- `docs/goals.md` — цели проекта (ЗАЧЕМ мы это делаем)
+- `docs/architecture.md` — Functional Components (из чего состоит)
+- `docs/specs/*.md` — спецификации компонентов (подробные требования)
+- `docs/tasks/*.md` — существующие задачи
+
+**Важно:** Планирование ведётся от:
+- Целей проекта (goals.md)
+- Компонентов системы (architecture.md → specs)
+- Уже существующих задач (tasks/)
+
 ## Workflow Stages
 
-### plan (planning) - СОЗДАНИЕ ЗАДАЧ В INDEX.JSON
-- Получи spec_id и goal
-- Проанализируй структуру проекта
-- Создай ГРАНУЛЯРНЫЕ задачи для реализации спеки
-- ДЛЯ КАЖДОЙ задачи вызови `team({ action: 'run', goal, specId, team, workflow })`
-- Это создаст задачу в index.json с привязкой к spec
-
-Пример:
-```
-// Для реализации модели Payment:
-team({ action: 'run', goal: 'Создать модель Payment в /src/models/payment.ts', specId: 'spec-001', team: 'implementation', workflow: 'implementation' })
-
-// Для тестирования:
-team({ action: 'run', goal: 'Написать unit-тесты для Payment', specId: 'spec-001', team: 'fast-fix', workflow: 'fast-fix' })
-```
+### plan (planning)
+- На основе goals, architecture и specs
+- Создай план реализации:
+  - Список задач с оценкой
+  - Зависимости между задачами
+  - Приоритеты
+  - Риски
+- artifact output: plan.md с декомпозицией на задачи
 
 ### assess (implementation)
 - Адаптивное планирование
@@ -37,6 +43,6 @@ team({ action: 'run', goal: 'Написать unit-тесты для Payment', s
 
 ## Важно
 
-- При planning workflow: СОЗДАВАЙ ЗАДАЧИ через team tool (не артефакты!)
 - Координируй других агентов
-- Следи за зависимостями
+- Следи за зависимостями между задачами
+- Каждая задача должна быть связана со spec-ом (Functional Component)

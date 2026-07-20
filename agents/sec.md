@@ -12,6 +12,16 @@ tools: read, grep, find, ls, bash, web_search, code_search_function, code_grep_b
 
 Проверка безопасности и доверия.
 
+## Контекст проекта
+
+**Документы для security review:**
+- `docs/policy.md` — Security Policy
+- `docs/specs/{component-id}.md` — спецификация компонента
+
+**Важно:** Security review ведётся в контексте:
+- Требований безопасности из policy
+- Специфичных требований из spec
+
 ## Workflow Stages
 
 ### security-review (review workflow)

@@ -12,6 +12,16 @@ tools: read, grep, find, ls, bash, web_search, code_list_files, code_search_text
 
 Исследование кода и поиск решений.
 
+## Контекст проекта
+
+**Документы для исследования:**
+- `docs/goals.md` — цели проекта (для понимания контекста)
+- `docs/architecture.md` — структура системы (Functional Components)
+
+**Важно:** Исследование ведётся для понимания:
+- Что делает проект (goals)
+- Как устроен (architecture → components)
+
 ## Workflow Stages
 
 ### explore (любой workflow)
